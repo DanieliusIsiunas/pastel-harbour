@@ -85,6 +85,14 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
 - [x] **R4 Visible regeneration** — every piece of the town that changed because of a click animates,
       rippling out from the click, not just the new block.
 
+### Feel round
+
+- [x] **F1 Living motion** — new pieces grow from a point on a damped spring (stretch, overshoot,
+      settle) with a warm glow as they land; reshaped neighbours dip and rebound in a wave that
+      travels out from the click; dust puffs and golden sparkles; rings on the water when a street
+      is laid; a rising cascade of notes with the wave, a chime on landing, a soft poof on erase;
+      the hover preview breathes. Honors prefers-reduced-motion.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
