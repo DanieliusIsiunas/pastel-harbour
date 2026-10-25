@@ -298,7 +298,7 @@ let M = null, MB = null, MA = null;
 // surface kind for the painted-material shader: 0 plain, 1 brick wall, 2 roof tiles, 3 cut stone
 let KIND = 0;
 const newMesh = () => ({ main: { p: [], c: [], k: [] }, lit: { p: [], c: [], k: [] }, dark: { p: [], c: [], k: [] }, foam: { p: [], c: [], k: [] } });
-const setTarget = key => { M = (MA && key === anim.key) ? MA : MB; };
+const setTarget = () => {};
 
 function face(bk, pts, col, ref, sh) {
   let nx, ny, nz;
@@ -385,13 +385,8 @@ function isolated(v, y) {
   return isoCache.get(k);
 }
 function doorOf(v) {
-  if (!doorCache.has(v)) {
-    let best = -1, bh = 2;
-    // prefer a side that opens onto a street, otherwise the quay edge
-    for (const n of vAdj[v]) if (!has(n, 1)) { const h = hash(Math.min(v, n), Math.max(v, n), 5, 5) + (has(n, 0) ? 0 : 1); if (h < bh) { bh = h; best = n; } }
-    doorCache.set(v, best);
-  }
-  return doorCache.get(v);
+  const h = houseOf(v);
+  return h && h.doors.has(v) ? h.doors.get(v) : -1;
 }
 // gable ends: the neighbours whose shared wall rises into a gable instead of a hipped slope.
 // A lone low house becomes a gabled cottage; the last house of a row often ends in a gable.
@@ -452,31 +447,65 @@ function apexOf(v, y) {
 }
 const toneOf = (v, y) => 0.95 + hash(v, y, 1, 1) * 0.08;
 
-// connected roofs are split into small regions that share one roof colour,
-// so a row of houses reads as a few buildings instead of a patchwork
+// ---------- R1: houses ----------
+// Adjacent columns of the same base colour group into house-sized units. A house owns its traits,
+// so every decision about doors, windows, roofs and chimneys is re-planned per house on each click.
 const ROOF_TONES = ['#dcaa63', '#e3b672', '#cf914e', '#d8723f', '#c95f3c', '#b9533b', '#e3824a', '#a94f45', '#d9a35f', '#c4683f'];
-let roofCache = new Map();
-function computeRoofRegions() {
-  roofCache = new Map();
-  const tops = [...blocks.keys()].map(parseKey).filter(([v, y]) => y >= 1 && !has(v, y + 1)).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
-  for (const [v0, y] of tops) {
-    if (roofCache.has(keyOf(v0, y))) continue;
-    const size = 3 + Math.floor(hash(v0, y, 13, 1) * 5);
-    const col = ROOF_TONES[Math.floor(hash(v0, y, 13, 2) * ROOF_TONES.length)];
+let houses = [], houseIdOf = new Map();
+const houseOf = v => houses[houseIdOf.get(v)];
+function topOf(v) { let t = 0; for (let y = 1; y < MAXY; y++) if (has(v, y)) t = y; return t; }
+function computeHouses() {
+  houses = []; houseIdOf = new Map();
+  const baseCol = new Map();
+  for (const k of blocks.keys()) {
+    const [v, y] = parseKey(k);
+    if (y < 1) continue;
+    const cur = baseCol.get(v);
+    if (!cur || y < cur.y) baseCol.set(v, { y, c: blocks.get(k).c });
+  }
+  const cols = [...baseCol.keys()].sort((a, b) => a - b);
+  for (const v0 of cols) {
+    if (houseIdOf.has(v0)) continue;
+    const c0 = baseCol.get(v0).c, cap = 2 + Math.floor(hash(v0, 0, 41, 1) * 3);
+    const r = k => hash(v0, 0, 41, k);
+    const h = {
+      id: houses.length, anchor: v0, cols: [v0],
+      roof: ROOF_TONES[Math.floor(r(3) * ROOF_TONES.length)],
+      windows: r(4) < 0.45 ? 'joint' : r(4) < 0.8 ? 'pair' : 'mix',
+      head: r(5), shutters: r(6) < 0.45, flowers: r(7) > 0.6, balcony: 0.08 + r(8) * 0.22,
+      shop: r(9) < 0.4, shutterCol: SHUTTERS[Math.floor(r(10) * SHUTTERS.length)],
+      awning: PALETTE[Math.floor(r(11) * PALETTE.length)].roof,
+    };
+    houseIdOf.set(v0, h.id);
     const q = [v0];
-    roofCache.set(keyOf(v0, y), col);
-    let n = 1;
-    while (q.length && n < size) {
+    while (q.length && h.cols.length < cap) {
       const v = q.shift();
-      for (const w of vAdj[v]) {
-        const k = keyOf(w, y);
-        if (n >= size || roofCache.has(k) || !has(w, y) || has(w, y + 1)) continue;
-        roofCache.set(k, col); q.push(w); n++;
+      for (const n of vAdj[v]) {
+        if (h.cols.length >= cap) break;
+        if (houseIdOf.has(n) || !baseCol.has(n) || baseCol.get(n).c !== c0) continue;
+        houseIdOf.set(n, h.id); h.cols.push(n); q.push(n);
       }
     }
+    // one main door on the side that best faces a street (a second one for wide houses)
+    const opts = [];
+    for (const v of h.cols) {
+      if (!has(v, 0) || !has(v, 1)) continue;
+      for (const n of vAdj[v]) if (!has(n, 1)) opts.push({ v, n, score: hash(v0, v, n, 5) + (has(n, 0) ? 0 : 1) });
+    }
+    opts.sort((x, y) => x.score - y.score);
+    h.doors = new Map();
+    for (const o of opts) {
+      if (h.doors.size >= (h.cols.length >= 4 ? 2 : 1)) break;
+      if (!h.doors.has(o.v)) h.doors.set(o.v, o.n);
+    }
+    // chimneys sit on the tallest columns
+    const byHeight = h.cols.slice().sort((a, b) => topOf(b) - topOf(a) || hash(a, 0, 42, 1) - hash(b, 0, 42, 1));
+    h.chimneys = new Set(byHeight.slice(0, h.cols.length >= 3 ? 2 : r(12) < 0.6 ? 1 : 0));
+    houses.push(h);
   }
 }
-const roofOf = (v, y) => roofCache.get(keyOf(v, y)) || '#b5563f';
+const roofOf = (v, y) => (houseOf(v) || {}).roof || '#c95f3c';
+
 
 let pickP = [], pickMeta = [];
 function pickQuad(a, b, c, d, meta) { pickP.push(...a, ...b, ...c, ...a, ...c, ...d); pickMeta.push(meta, meta); }
@@ -690,7 +719,9 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     }
     return;
   }
-  const h = hash(lo, hi, y, 21), h2 = hash(lo, hi, y, 23);
+  const house = houseOf(v) || { windows: 'joint', head: 0.2, shutters: false, flowers: false, balcony: 0.1, shop: false, shutterCol: SHUTTERS[0], awning: PALETTE[0].roof };
+  // the window type depends on the facade edge only (not the floor), so windows stack floor to floor
+  const hh = hash(lo, hi, 0, 21);
   // dormer on the roof slope above this wall, centred on the joint like the windows
   if (L > 0.3 && !has(v, y + 1) && !isolated(v, y) && !isGable(v, y, other) && hash(lo, hi, y, 31) < 0.22) {
     const roofHexD = roofOf(v, y), base = y + 1;
@@ -705,7 +736,7 @@ function emitFacade(y, s, F, v, b, vv, cell) {
   }
   const sill = (s0, s1) => wb(F, s0, s1, 0, 0.08, y + 0.3, y + 0.35, trim);
   // each house column keeps one window-head style: plain lintel, pediment or round arch
-  const headStyle = hash(v, 0, 27, 1);
+  const headStyle = house.head;
   const head = (s1, top) => {
     if (headStyle < 0.4 || y === 1) wb(F, 0, s1 + 0.03, 0, 0.04, top, top + 0.035, trim);
     else if (headStyle < 0.7) wseg(F, 0, top + 0.1, s1 + 0.04, top + 0.02, 0, 0.042, 0.032, trim);
@@ -724,38 +755,18 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     if (y1 - y0 < 0.6) wb(F, 0, half, 0, 0.042, y + (y0 + y1) / 2 - 0.008, y + (y0 + y1) / 2 + 0.008, trim);
     if (y1 - y0 > 0.3) head(half + 0.035, y + y1);
   };
-  if (onStreet(v, y) && h < 0.28 && L > 0.3) {
+  if (onStreet(v, y) && house.shop && has(other, 0) && L > 0.3) {
     // shopfront with a striped awning
     const e = Math.min(L - 0.05, 0.42);
     wb(F, 0, e, 0, 0.025, y + 0.1, y + 0.6, trim);
     wb(F, 0, e - 0.04, 0, 0.034, y + 0.14, y + 0.56, gcol, lit);
     const n = Math.max(2, Math.round(e / 0.075)), w = (e + 0.03) / n;
-    const stripe = [lin(C.trim), lin(PALETTE[Math.floor(h2 * PALETTE.length)].roof)];
+    const stripe = [lin(C.trim), lin(house.awning)];
     for (let i = 0; i < n; i++) wslab(F, i * w, (i + 1) * w, 0, y + 0.74, 0.26, y + 0.62, 0.03, stripe[i & 1]);
     return;
   }
-  if (h < 0.5) {
-    jointWindow(0.085);
-    sill(0, 0.14);
-    if (h2 < 0.45 && L > 0.3) {
-      const sh = lin(SHUTTERS[Math.floor(hash(v, 0, 28, 1) * SHUTTERS.length)]);
-      wb(F, 0.125, 0.205, 0, 0.04, y + 0.42, y + 0.73, sh);
-    } else if (h2 > 0.7) {
-      wb(F, 0, 0.16, 0, 0.1, y + 0.35, y + 0.42, lin(C.leaf));
-      for (const sx of [0.04, 0.11]) wb(F, sx, sx + 0.035, 0.05, 0.085, y + 0.42, y + 0.46, lin(h2 > 0.85 ? '#f2a7b5' : '#fbe7a1'));
-    }
-    return;
-  }
-  if (h < 0.74 && L > 0.34) {
-    const sc = L * 0.55;
-    wb(F, sc - 0.1, sc + 0.1, 0, 0.025, y + 0.4, y + 0.75, trim);
-    wb(F, sc - 0.065, sc + 0.065, 0, 0.034, y + 0.435, y + 0.715, gcol, lit);
-    wb(F, sc - 0.006, sc + 0.006, 0, 0.042, y + 0.435, y + 0.715, trim);
-    wb(F, sc - 0.065, sc + 0.065, 0, 0.042, y + 0.567, y + 0.583, trim);
-    sill(sc - 0.12, sc + 0.12);
-    return;
-  }
-  if (h < 0.88 && y >= 2 && !has(other, y - 1) && !has(other, y)) {
+  if (hh < 0.06) return;   // an occasional blank wall, the same on every floor
+  if (y >= 2 && !has(other, y - 1) && !has(other, y) && hash(lo, hi, y, 25) < house.balcony) {
     // french window with a balcony
     jointWindow(0.1, 0.03, 0.82);
     wslab(F, 0, 0.3, 0, y + 0.02, 0.22, y + 0.02, 0.035, trim);
@@ -765,9 +776,27 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     for (const d of [0.06, 0.13]) wb(F, 0.288, 0.3, d, d + 0.012, y + 0.055, y + 0.27, trim);
     return;
   }
-  if (h < 0.95) {
-    jointWindow(0.06, 0.5, 0.74);
+  const pair = L > 0.34 && (house.windows === 'pair' || (house.windows === 'mix' && hh > 0.5));
+  if (pair) {
+    const sc = L * 0.55;
+    wb(F, sc - 0.1, sc + 0.1, 0, 0.025, y + 0.4, y + 0.75, trim);
+    wb(F, sc - 0.065, sc + 0.065, 0, 0.034, y + 0.435, y + 0.715, gcol, lit);
+    wb(F, sc - 0.006, sc + 0.006, 0, 0.042, y + 0.435, y + 0.715, trim);
+    wb(F, sc - 0.065, sc + 0.065, 0, 0.042, y + 0.567, y + 0.583, trim);
+    sill(sc - 0.12, sc + 0.12);
+    if (house.shutters && L > 0.42) {
+      const sh = lin(house.shutterCol);
+      wb(F, sc - 0.17, sc - 0.105, 0, 0.04, y + 0.42, y + 0.73, sh);
+      wb(F, sc + 0.105, sc + 0.17, 0, 0.04, y + 0.42, y + 0.73, sh);
+    }
     return;
+  }
+  jointWindow(0.085);
+  sill(0, 0.14);
+  if (house.shutters && L > 0.3) wb(F, 0.125, 0.205, 0, 0.04, y + 0.42, y + 0.73, lin(house.shutterCol));
+  else if (house.flowers) {
+    wb(F, 0, 0.16, 0, 0.1, y + 0.35, y + 0.42, lin(C.leaf));
+    for (const sx of [0.04, 0.11]) wb(F, sx, sx + 0.035, 0.05, 0.085, y + 0.42, y + 0.46, lin(hh > 0.5 ? '#f2a7b5' : '#fbe7a1'));
   }
 }
 
@@ -817,6 +846,35 @@ function capLine(p0, p1, col) {
                 [p0[0] - sx, p0[1] + h1, p0[2] - sz], [p0[0] + sx, p0[1] + h1, p0[2] + sz], [p1[0] + sx, p1[1] + h1, p1[2] + sz], [p1[0] - sx, p1[1] + h1, p1[2] - sz]], col);
 }
 
+// a tall lone tower (five floors or more) usually becomes a lighthouse instead of taking a spire
+const isLighthouse = (v, y) => y >= 4 && has(v, y - 1) && isolated(v, y) && !gableOf(v, y).length && hash(v, 0, 43, 1) < 0.7;
+function emitLighthouse(ci, y, v, b, R, Vq, roofHex) {
+  const top = y + 1, deck = lin(C.stoneLip), edge = lin(shade(C.stoneLip, 0.78));
+  const pt = (r, o) => r.e ? [r.p[0] + r.off[0] * o, r.p[1] + r.off[1] * o] : r.p;
+  // gallery deck overhanging the tower, ringed by a railing
+  for (let i = 0; i < R.length - 1; i++) {
+    const a = pt(R[i], 0.13), c = pt(R[i + 1], 0.13);
+    face('main', [P3(Vq, top + 0.03), P3(a, top + 0.03), P3(c, top + 0.03)], deck, P3(Vq, top - 1));
+    face('main', [P3(a, top - 0.06), P3(c, top - 0.06), P3(c, top + 0.03), P3(a, top + 0.03)], edge, P3(Vq, top));
+    face('main', [P3(a, top - 0.06), P3(c, top - 0.06), P3(R[i + 1].p, top - 0.06), P3(R[i].p, top - 0.06)], edge, P3(Vq, top + 2));
+    railing(pt(R[i], 0.11), pt(R[i + 1], 0.11), top + 0.03);
+  }
+  if (vCells[v][0][0] !== ci) return;
+  // lantern room: glass panels between iron posts under a small domed cap
+  const [x, z] = Vq, r = 0.17, y0 = top + 0.1, y1 = top + 0.5;
+  boxAt(x, z, 0.2, top + 0.03, y0, lin(shade(b.c, 0.92)));
+  for (let i = 0; i < 8; i++) {
+    const a0 = (i / 8) * Math.PI * 2, a1 = ((i + 1) / 8) * Math.PI * 2;
+    const p0 = [x + Math.cos(a0) * r, z + Math.sin(a0) * r], p1 = [x + Math.cos(a1) * r, z + Math.sin(a1) * r];
+    face('lit', [P3(p0, y0), P3(p1, y0), P3(p1, y1), P3(p0, y1)], [1, 1, 1], P3(Vq, (y0 + y1) / 2));
+    boxAt(p0[0], p0[1], 0.012, y0, y1, IRON);
+    const c0 = [x + Math.cos(a0) * 0.24, z + Math.sin(a0) * 0.24], c1 = [x + Math.cos(a1) * 0.24, z + Math.sin(a1) * 0.24];
+    face('main', [P3(c0, y1), P3(c1, y1), [x, y1 + 0.32, z]], lin(roofHex, 0.85), [x, y1 - 0.5, z]);
+    face('main', [P3(c0, y1), P3(c1, y1), [x, y1 - 0.01, z]], lin(shade(roofHex, 0.6)), [x, y1 + 1, z]);
+  }
+  boxAt(x, z, 0.03, y1 + 0.28, y1 + 0.42, lin(C.gold));
+}
+
 function emitRoof(ci, q, y, v, b, R, Vq) {
   const roofHex = roofOf(v, y);
   const Hr = y + 1 + RISE, E = y + 1 - DROP, HV = apexOf(v, y);
@@ -825,6 +883,7 @@ function emitRoof(ci, q, y, v, b, R, Vq) {
     : r.e ? [r.p[0] + r.off[0] * OVER, E + RT, r.p[1] + r.off[1] * OVER] : [r.p[0], Hr, r.p[1]];
   const apex = [Vq[0], HV, Vq[1]], below = [Vq[0], y + 0.3, Vq[1]];
   const flat = R.every(r => !r.e) && HV === Hr;
+  if (isLighthouse(v, y)) { emitLighthouse(ci, y, v, b, R, Vq, roofHex); return; }
   if (flat) {
     // the inside of a big block becomes a roof terrace, sometimes a garden
     const g = hash(v, y, ci, 4);
@@ -873,7 +932,7 @@ function emitRoof(ci, q, y, v, b, R, Vq) {
   if (HV > Hr + 0.3) {
     boxAt(Vq[0], Vq[1], 0.035, HV - 0.05, HV + 0.12, lin(C.gold));
     boxAt(Vq[0], Vq[1], 0.012, HV + 0.12, HV + 0.32, lin(C.gold));
-  } else if (!isolated(v, y) && hash(v, y, 6, 6) < 0.32) {
+  } else if (!isolated(v, y) && houseOf(v) && houseOf(v).chimneys.has(v) && y === topOf(v)) {
     const p = l2(Vq, R[0].p, 0.42);
     boxAt(p[0], p[1], 0.065, y + 1.05, Hr + 0.22, lin(C.stone));
     boxAt(p[0], p[1], 0.085, Hr + 0.22, Hr + 0.27, lin(shade(C.stone, 0.82)));
@@ -1195,19 +1254,53 @@ let townObj = new THREE.Group(); scene.add(townObj);
 let pickMesh = null;
 const pickMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, colorWrite: false, depthWrite: false, transparent: true, opacity: 0 });
 
+// ---------- R4: visible regeneration ----------
+// Every cell-level chunk keeps a signature of its geometry. After a click, the chunks whose
+// signature changed animate in a ripple spreading out from the click, then the town is baked again.
+let prevSigs = new Map(), regen = null, ripple = [];
+function sigOf(m) {
+  let s = 0, n = 0;
+  for (const k in m) {
+    const p = m[k].p, c = m[k].c;
+    n += p.length;
+    for (let i = 0; i < p.length; i++) s = (s * 1.0000037 + p[i] * (i % 13 + 1) + c[i] * 7.1) % 1e7;
+  }
+  return n + ':' + s.toFixed(3);
+}
+function appendMesh(dst, src) {
+  for (const k in src) {
+    const a = dst[k], b = src[k];
+    for (let i = 0; i < b.p.length; i++) { a.p.push(b.p[i]); a.c.push(b.c[i]); }
+    for (let i = 0; i < b.k.length; i++) a.k.push(b.k[i]);
+  }
+}
+function clearRipple() {
+  for (const r of ripple) { disposeGroup(r.obj); scene.remove(r.obj); }
+  ripple = [];
+}
+
 function rebuild() {
   disposeGroup(townObj); scene.remove(townObj);
-  if (anim.obj) { disposeGroup(anim.obj); scene.remove(anim.obj); anim.obj = null; }
-  MB = newMesh(); MA = anim.key && blocks.has(anim.key) ? newMesh() : null; M = MB;
+  clearRipple();
+  MB = newMesh(); M = MB;
+  const now = performance.now(), sigs = new Map(), changed = [];
   doorCache = new Map(); isoCache = new Map(); gableCache = new Map(); stairCache = new Map();
-  computeRoofRegions();
+  computeHouses();
   pickP = []; pickMeta = [];
   const trees = [], todo = new Set();
   for (const k of blocks.keys()) {
     const [v, y] = parseKey(k);
     for (const [ci] of vCells[v]) todo.add(ci * 64 + y);
   }
-  for (const code of todo) emitCellLevel(Math.floor(code / 64), code % 64);
+  for (const code of todo) {
+    M = newMesh();
+    emitCellLevel(Math.floor(code / 64), code % 64);
+    const sig = sigOf(M);
+    sigs.set(code, sig);
+    if (regen && prevSigs.size && prevSigs.get(code) !== sig) changed.push({ ci: Math.floor(code / 64), y: code % 64, m: M });
+    else appendMesh(MB, M);
+  }
+  prevSigs = sigs;
   M = MB;
   for (let v = 0; v < VERTS.length; v++) if (isCourtyard(v)) emitCourtyard(v, trees);
   townObj = meshesFrom(MB);
@@ -1222,10 +1315,18 @@ function rebuild() {
     townObj.add(im);
   }
   scene.add(townObj);
-  if (MA) {
-    const [v, y] = parseKey(anim.key);
-    anim.obj = meshesFrom(MA, [VERTS[v][0], y, VERTS[v][1]]);
-    scene.add(anim.obj);
+  if (regen) {
+    const [rx, rz] = VERTS[regen.v];
+    for (const ch of changed) {
+      const [cx, cz] = cells[ch.ci].c, base = ch.y === 0 ? WATER : ch.y;
+      const obj = meshesFrom(ch.m, [cx, base, cz]);
+      const full = !regen.erase && ch.y === regen.y && cells[ch.ci].v.includes(regen.v);
+      const delay = reduceMotion ? 0 : Math.min(320, Math.hypot(cx - rx, cz - rz) * 85 + Math.abs(ch.y - regen.y) * 60);
+      obj.scale.set(1, full ? 0.001 : 0.86, 1);
+      scene.add(obj);
+      ripple.push({ obj, start: now + delay, full });
+    }
+    regen = null;
   }
   if (pickMesh) { pickMesh.geometry.dispose(); scene.remove(pickMesh); pickMesh = null; }
   if (pickP.length) {
@@ -1486,6 +1587,7 @@ function act(cx, cy, erase) {
   const t = pick(cx, cy, erase);
   if (!t) return;
   if (t.erase) {
+    regen = { v: t.v, y: t.y, erase: true };
     commit(() => blocks.delete(keyOf(t.v, t.y)));
     pluck(t.y, true);
   } else {
@@ -1493,8 +1595,8 @@ function act(cx, cy, erase) {
     const below = blocks.get(keyOf(t.v, t.y - 1));
     const c = colorChoice !== 'mixed' ? colorChoice : (t.y >= 2 && below ? below.c : nextMixed);
     nextMixed = colorForPlacement();
-    anim = { key: keyOf(t.v, t.y), start: performance.now(), obj: null };
-    commit(() => blocks.set(anim.key, { c }));
+    regen = { v: t.v, y: t.y, erase: false };
+    commit(() => blocks.set(keyOf(t.v, t.y), { c }));
     pluck(t.y);
   }
   ghostKey = '';
@@ -1643,6 +1745,7 @@ if (!lowPower) {
   composer.addPass(gtao);
 }
 window.harbourAO = on => { if (gtao) gtao.enabled = on; };
+window.harbourStats = () => ({ blocks: blocks.size, houses: houses.length, rippling: ripple.length, doors: houses.reduce((n, h) => n + h.doors.size, 0) });
 // ink: screen-space outlines from the AO pass's depth and normal buffers, so the cost does not grow
 // with the town. Lines appear where depth jumps (silhouettes) or the surface turns (creases).
 let ink = null;
@@ -1726,11 +1829,16 @@ function tick(now) {
     const flap = Math.sin(t * gl.f + gl.p) * 0.45;
     gl.wl.rotation.z = flap; gl.wr.rotation.z = -flap;
   }
-  if (anim.obj) {
-    const p = Math.min(1, (now - anim.start) / (reduceMotion ? 1 : 420));
-    const s = Math.max(0.001, easeOutBack(p));
-    anim.obj.scale.set(1 + (1 - s) * 0.25, s, 1 + (1 - s) * 0.25);
-    if (p >= 1) { anim.key = null; rebuild(); }
+  if (ripple.length) {
+    let done = true;
+    for (const r of ripple) {
+      const p = Math.max(0, Math.min(1, (now - r.start) / (reduceMotion ? 1 : r.full ? 420 : 340)));
+      if (p < 1) done = false;
+      const e = easeOutBack(p);
+      if (r.full) { const s = Math.max(0.001, e); r.obj.scale.set(1 + (1 - s) * 0.25, s, 1 + (1 - s) * 0.25); }
+      else { const s = 0.86 + 0.14 * e; r.obj.scale.set(1 + (1 - s) * 0.3, s, 1 + (1 - s) * 0.3); }
+    }
+    if (done) rebuild();
   }
   controls.update();
   sun.target.position.set(0, 0, 0);

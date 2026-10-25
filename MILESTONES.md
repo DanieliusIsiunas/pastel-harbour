@@ -72,10 +72,26 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
 - [x] **P5 Quay character** — red brick coping on quay edges, iron railings on open edges,
       small cross-barred windows that make buildings feel larger.
 
+### Regeneration round (the town re-plans itself around every click)
+
+- [x] **R1 Houses** — adjacent columns of the same colour group into house-sized units. Each house
+      owns its traits: roof colour, window family, head style, shutters, one main door facing a
+      street, shopfront or not, chimney positions. Decisions are anchored to the house, so a click
+      only re-plans the house it touches.
+- [x] **R2 Facade composition** — window types stack vertically floor to floor and follow the
+      house's family; blank walls and balconies line up; shops fill a house's street frontage.
+- [x] **R3 Role reinterpretation** — a tall lone tower turns into a lighthouse with a gallery and a
+      glowing lantern; a house's door moves when a neighbour covers its old street side.
+- [x] **R4 Visible regeneration** — every piece of the town that changed because of a click animates,
+      rippling out from the click, not just the new block.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
 ## Polish ideas for later
+
+- More roles: covered bridges between houses, roof terraces with a door when a roof meets a taller wall,
+  belfries, warehouses with wide doors for long low houses.
 
 - Dormer and chimney variety, roof windows; corner quoins on crisp corners.
 - Interior light spill on streets at night; window boxes that vary by colour family.
@@ -90,5 +106,6 @@ Open `index.html` through any static server, for example:
 
 then visit http://localhost:8000. In the browser console, `harbourView(x, y, z, tx, ty, tz)`
 moves the camera, and `harbourAO(false)` turns ambient occlusion off for comparison
-(the ink outlines reuse the occlusion pass's buffers, so they are desktop-only too). (The file is written without `<!doctype>`/`<head>` because it is
+(the ink outlines reuse the occlusion pass's buffers, so they are desktop-only too).
+`harbourStats()` reports blocks, houses, doors and how many pieces are still rippling. (The file is written without `<!doctype>`/`<head>` because it is
 also published as a claude.ai artifact; browsers render it fine.)
