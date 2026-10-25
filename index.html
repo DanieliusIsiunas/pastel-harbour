@@ -98,7 +98,7 @@ button.t:disabled { opacity: .4; cursor: default; }
 
 <div class="card">
   <h1>Pastel Harbour</h1>
-  <p class="help">Click the water to raise a house. Click a wall or roof to build onto it. Roofs, windows, arches and gardens arrange themselves.</p>
+  <p class="help">Click the water to lay a cobbled street. Click a street to raise a house on it, or a wall or roof to build onto it. Roofs, windows, arches and gardens arrange themselves.</p>
   <p class="help"><kbd>Shift</kbd> or right-click removes · drag to orbit · scroll to zoom · <kbd>⌘Z</kbd> undo · <kbd>T</kbd> time of day</p>
   <div class="count" id="count">0 blocks</div>
 </div>
@@ -252,42 +252,48 @@ function generateGrid(seed, N, L) {
 
 const GRID = generateGrid(GRID_SEED, HEX_N, TRI_SIDE);
 const cells = GRID.cells;
+cells.forEach((c, i) => { c.i = i; });
 
-function cellAt(x, z) {
-  let best = -1, bd = Infinity;
-  for (let i = 0; i < cells.length; i++) {
-    const c = cells[i], dx = x - c.c[0], dz = z - c.c[1], d2 = dx * dx + dz * dz;
-    if (d2 > 4) continue;
-    let inside = true;
-    for (let k = 0; k < 4; k++) {
-      const a = c.q[k], b = c.q[(k + 1) % 4];
-      if ((b[0] - a[0]) * (z - a[1]) - (b[1] - a[1]) * (x - a[0]) < -1e-9) { inside = false; break; }
-    }
-    if (inside) return i;
-    if (d2 < bd) { bd = d2; best = i; }
+// vertex topology: houses live on grid corners (Townscaper's dual grid)
+const VERTS = GRID.V;
+const vAdj = VERTS.map(() => []);
+for (const [a, b] of GRID.edges) { vAdj[a].push(b); vAdj[b].push(a); }
+const vCells = VERTS.map(() => []);
+cells.forEach((c, ci) => c.v.forEach((v, k) => vCells[v].push([ci, k])));
+const vFixed = VERTS.map(v => 0);
+for (const [a, b] of GRID.edges) {
+  // an edge used by a single cell lies on the outer boundary
+  const shared = vCells[a].filter(([ci]) => vCells[b].some(([cj]) => cj === ci)).length;
+  if (shared < 2) vFixed[a] = vFixed[b] = 1;
+}
+function vertexAt(x, z, maxD = 0.9) {
+  let best = -1, bd = maxD * maxD;
+  for (let i = 0; i < VERTS.length; i++) {
+    if (vFixed[i]) continue;
+    const dx = VERTS[i][0] - x, dz = VERTS[i][1] - z, d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = i; }
   }
-  return bd < 0.5 ? best : -1;
+  return best;
 }
 
 // ---------- state ----------
-let blocks = new Map();              // "cell:level" -> { c: wallHex }
-const keyOf = (ci, y) => ci + ':' + y;
-const has = (ci, y) => ci >= 0 && blocks.has(keyOf(ci, y));
+let blocks = new Map();              // "vertex:level" -> { c: wallHex }
+const keyOf = (v, y) => v + ':' + y;
+const has = (v, y) => v >= 0 && y >= 0 && blocks.has(keyOf(v, y));
 const parseKey = k => k.split(':').map(Number);
 let undoStack = [], redoStack = [];
 let colorChoice = 'mixed', mode = 'build', soundOn = true;
 let anim = { key: null, start: 0, obj: null };
 
-// ---------- mesh emission: everything is a deformed box in a cell's unit square ----------
+// ---------- mesh emission ----------
 function W(cell, u, v, y) {
   const q = cell.q, a = (1 - u) * (1 - v), b = u * (1 - v), c = u * v, d = (1 - u) * v;
   return [a * q[0][0] + b * q[1][0] + c * q[2][0] + d * q[3][0], y, a * q[0][1] + b * q[1][1] + c * q[2][1] + d * q[3][1]];
 }
-// frame of edge k: s runs along the edge, d points inward (negative d = outside the wall)
-function E(k, s, d) { return k === 0 ? [s, d] : k === 1 ? [1 - d, s] : k === 2 ? [1 - s, 1 - d] : [d, 1 - s]; }
 
-let M = null;
+let M = null, MB = null, MA = null;
 const newMesh = () => ({ main: { p: [], c: [] }, lit: { p: [], c: [] }, dark: { p: [], c: [] }, foam: { p: [], c: [] } });
+const setTarget = key => { M = (MA && key === anim.key) ? MA : MB; };
 
 function face(bk, pts, col, ref, sh) {
   let nx, ny, nz;
@@ -300,7 +306,7 @@ function face(bk, pts, col, ref, sh) {
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     nx = uy * vz - uz * vy; ny = uz * vx - ux * vz; nz = ux * vy - uy * vx;
   }
-  if (nx * nx + ny * ny + nz * nz < 1e-12) return;
+  if (nx * nx + ny * ny + nz * nz < 1e-14) return;
   let cx = 0, cy = 0, cz = 0;
   for (const p of pts) { cx += p[0]; cy += p[1]; cz += p[2]; }
   const n = pts.length;
@@ -313,185 +319,594 @@ function face(bk, pts, col, ref, sh) {
   }
 }
 const HEX_FACES = [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7], [3, 2, 1, 0], [4, 5, 6, 7]];
-const SKIP_BOTTOM = 16, SKIP_TOP = 32, SIDES = 15;
-function hexa(bk, P, col, mask = 0, sh = null) {
+function hexa(bk, P, col, sh = null) {
   let rx = 0, ry = 0, rz = 0;
   for (const p of P) { rx += p[0]; ry += p[1]; rz += p[2]; }
   const ref = [rx / 8, ry / 8, rz / 8];
-  for (let f = 0; f < 6; f++) {
-    if (mask & (1 << f)) continue;
-    const ix = HEX_FACES[f];
-    face(bk, ix.map(i => P[i]), col, ref, sh && ix.map(i => sh[i]));
-  }
+  for (const ix of HEX_FACES) face(bk, ix.map(i => P[i]), col, ref, sh && ix.map(i => sh[i]));
 }
-function prism(bk, t0, t1, col) {
-  const all = [...t0, ...t1], ref = [0, 0, 0];
-  for (const p of all) { ref[0] += p[0] / 6; ref[1] += p[1] / 6; ref[2] += p[2] / 6; }
-  face(bk, t0, col, ref); face(bk, t1, col, ref);
-  for (let i = 0; i < 3; i++) face(bk, [t0[i], t0[(i + 1) % 3], t1[(i + 1) % 3], t1[i]], col, ref);
-}
-// box in a cell's uv square
-function ub(cell, y, u0, u1, v0, v1, y0, y1, col, bk = 'main', mask = 0, sh = null) {
-  hexa(bk, [W(cell, u0, v0, y + y0), W(cell, u1, v0, y + y0), W(cell, u1, v1, y + y0), W(cell, u0, v1, y + y0),
-            W(cell, u0, v0, y + y1), W(cell, u1, v0, y + y1), W(cell, u1, v1, y + y1), W(cell, u0, v1, y + y1)], col, mask, sh);
-}
-// box in edge k's frame
-function fb(cell, y, k, s0, s1, d0, d1, y0, y1, col, bk = 'main', mask = 0) {
-  const P = (s, d, yy) => { const [u, v] = E(k, s, d); return W(cell, u, v, y + yy); };
-  hexa(bk, [P(s0, d0, y0), P(s1, d0, y0), P(s1, d1, y0), P(s0, d1, y0), P(s0, d0, y1), P(s1, d0, y1), P(s1, d1, y1), P(s0, d1, y1)], col, mask);
+function boxAt(x, z, hw, y0, y1, col, bk = 'main') {
+  hexa(bk, [[x - hw, y0, z - hw], [x + hw, y0, z - hw], [x + hw, y0, z + hw], [x - hw, y0, z + hw],
+            [x - hw, y1, z - hw], [x + hw, y1, z - hw], [x + hw, y1, z + hw], [x - hw, y1, z + hw]], col);
 }
 function shade(hex, k) { return '#' + new THREE.Color(hex).multiplyScalar(k).getHexString(); }
 
-// ---------- M2: architecture rules ----------
-function isCourtyard(ci) {
-  if (has(ci, 0)) return false;
-  const c = cells[ci];
-  return c.nb.every(n => n >= 0 && has(n, 0));
+// 2D helpers on the xz plane
+const l2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+const sub2 = (a, b) => [a[0] - b[0], a[1] - b[1]];
+const norm2 = a => { const l = Math.hypot(a[0], a[1]) || 1; return [a[0] / l, a[1] / l]; };
+const P3 = (p, y) => [p[0], y, p[1]];
+function outward(a, b, inside) {
+  const t = norm2(sub2(b, a)); let n = [t[1], -t[0]];
+  const m = l2(a, b, 0.5);
+  if (n[0] * (inside[0] - m[0]) + n[1] * (inside[1] - m[1]) > 0) n = [-n[0], -n[1]];
+  return n;
 }
 
-function emitBlock(ci, y, b) {
-  const cell = cells[ci];
-  const r = i => hash(ci, y, i, 7);
-  const tone = 0.95 + r(1) * 0.08;
-  const wall = lin(b.c, tone), trim = lin(C.trim), glassDark = lin(C.glass);
-  const roofHex = ROOF_OF[b.c] || '#7a5a4a';
-  const below = y > 0 && has(ci, y - 1), supported = y === 0 || below, above = has(ci, y + 1);
-  const nbHas = (k, ly) => has(cell.nb[k], ly);
-
-  if (y === 0) {
-    ub(cell, 0, -0.04, 1.04, -0.04, 1.04, -0.85, -0.02, lin(C.stone), 'main', SKIP_BOTTOM, [0.7, 0.7, 0.7, 0.7, 1, 1, 1, 1]);
-    ub(cell, 0, -0.07, 1.07, -0.07, 1.07, -0.06, 0.02, lin(C.stoneLip));
-    for (let k = 0; k < 4; k++) {
-      const n = cell.nb[k];
-      if (n >= 0 && (has(n, 0) || isCourtyard(n))) continue;
-      fb(cell, 0, k, -0.06, 1.06, -0.42, -0.07, -0.13, -0.12, lin(C.foam), 'foam', SIDES | SKIP_BOTTOM);
-    }
-  }
-
-  let wallMask = SKIP_BOTTOM | (above ? SKIP_TOP : 0);
-  for (let k = 0; k < 4; k++) if (nbHas(k, y)) wallMask |= 1 << k;
-  if (supported) {
-    const s0 = y === 0 ? 0.78 : 1;
-    ub(cell, y, 0, 1, 0, 1, 0, 1, wall, 'main', wallMask, [s0, s0, s0, s0, 1, 1, 1, 1]);
-  } else {
-    // arcade: a slab with arched openings on every open side
-    ub(cell, y, 0, 1, 0, 1, 0.62, 1, wall, 'main', wallMask & ~SKIP_BOTTOM, [0.62, 0.62, 0.62, 0.62, 1, 1, 1, 1]);
-    for (let k = 0; k < 4; k++) {
-      if (nbHas(k, y)) continue;
-      const n = 8;
-      for (let i = 0; i < n; i++) {
-        const s0 = i / n, s1 = (i + 1) / n, sm = (s0 + s1) / 2, t = (sm - 0.5) / 0.4;
-        const open = Math.abs(t) < 1 ? Math.min(0.54, 0.06 + 0.5 * Math.sqrt(1 - t * t)) : 0;
-        fb(cell, y, k, s0, s1, 0, 0.1, open, 0.62, wall);
-      }
-    }
-  }
-
-  // facades
-  if (supported) {
-    const open = [0, 1, 2, 3].filter(k => !nbHas(k, y));
-    const doorK = y === 0 && open.length ? open[Math.floor(r(9) * open.length)] : -1;
-    for (const k of open) {
-      const L = cell.len[k];
-      if (k === doorK) {
-        fb(cell, y, k, 0.3, 0.7, -0.025, 0, 0, 0.7, trim);
-        fb(cell, y, k, 0.35, 0.65, -0.04, 0, 0, 0.62, lin(C.wood));
-        fb(cell, y, k, 0.25, 0.75, -0.18, 0, 0.74, 0.79, lin(roofHex));
-        fb(cell, y, k, 0.28, 0.72, -0.16, 0, 0, 0.05, lin(C.stoneLip));
-        fb(cell, y, k, 0.76, 0.82, -0.07, 0, 0.5, 0.6, lin(C.lamp), 'lit');
-        continue;
-      }
-      const v = r(20 + k);
-      if (v < 0.08) continue;
-      const lit = r(40 + k) < 0.62 ? 'lit' : 'dark';
-      const gcol = lit === 'lit' ? lin('#ffffff') : glassDark;
-      const windowAt = (sa, sb) => {
-        fb(cell, y, k, sa - 0.04, sb + 0.04, -0.025, 0, 0.33, 0.8, trim);
-        fb(cell, y, k, sa, sb, -0.035, 0, 0.37, 0.76, gcol, lit);
-        fb(cell, y, k, sa - 0.07, sb + 0.07, -0.08, 0, 0.3, 0.35, trim);
-      };
-      if (y >= 2 && v > 0.84) {
-        // balcony with a french window
-        fb(cell, y, k, 0.34, 0.66, -0.025, 0, 0.02, 0.8, trim);
-        fb(cell, y, k, 0.38, 0.62, -0.035, 0, 0.04, 0.76, gcol, lit);
-        fb(cell, y, k, 0.22, 0.78, -0.24, 0, 0, 0.05, trim);
-        fb(cell, y, k, 0.22, 0.78, -0.24, -0.21, 0.05, 0.28, trim);
-        fb(cell, y, k, 0.22, 0.25, -0.24, 0, 0.05, 0.28, trim);
-        fb(cell, y, k, 0.75, 0.78, -0.24, 0, 0.05, 0.28, trim);
-        continue;
-      }
-      if (L > 1.25 && v > 0.3) { windowAt(0.2, 0.38); windowAt(0.62, 0.8); }
-      else if (v < 0.7) {
-        windowAt(0.36, 0.64);
-        if (r(30 + k) > 0.55) fb(cell, y, k, 0.32, 0.68, -0.1, 0, 0.35, 0.43, lin(C.leaf));
-      } else {
-        windowAt(0.38, 0.62);
-        const sh = lin(shade(b.c, 0.7));
-        fb(cell, y, k, 0.24, 0.33, -0.04, 0, 0.36, 0.78, sh);
-        fb(cell, y, k, 0.67, 0.76, -0.04, 0, 0.36, 0.78, sh);
-      }
-    }
-  }
-
-  if (!above) emitRoof(ci, y, b, wall, roofHex, r);
+// wall frame: s along the wall from its joint, d outward, absolute y
+function wb(F, s0, s1, d0, d1, y0, y1, col, bk = 'main') {
+  const P = (s, d, yy) => [F.a[0] + F.t[0] * s + F.n[0] * d, yy, F.a[1] + F.t[1] * s + F.n[1] * d];
+  hexa(bk, [P(s0, d0, y0), P(s1, d0, y0), P(s1, d1, y0), P(s0, d1, y0), P(s0, d0, y1), P(s1, d0, y1), P(s1, d1, y1), P(s0, d1, y1)], col);
+}
+// sloped bar along a wall: from (s0, ya) to (s1, yb)
+function wseg(F, s0, ya, s1, yb, d0, d1, th, col) {
+  const P = (s, d, yy) => [F.a[0] + F.t[0] * s + F.n[0] * d, yy, F.a[1] + F.t[1] * s + F.n[1] * d];
+  hexa('main', [P(s0, d0, ya), P(s1, d0, yb), P(s1, d1, yb), P(s0, d1, ya), P(s0, d0, ya + th), P(s1, d0, yb + th), P(s1, d1, yb + th), P(s0, d1, ya + th)], col);
+}
+function wslab(F, s0, s1, d0, ya, d1, yb, th, col) {
+  const P = (s, d, yy) => [F.a[0] + F.t[0] * s + F.n[0] * d, yy, F.a[1] + F.t[1] * s + F.n[1] * d];
+  hexa('main', [P(s0, d0, ya), P(s1, d0, ya), P(s1, d1, yb), P(s0, d1, yb), P(s0, d0, ya + th), P(s1, d0, ya + th), P(s1, d1, yb + th), P(s0, d1, yb + th)], col, [0.7, 0.7, 0.7, 0.7, 1, 1, 1, 1]);
 }
 
-function emitRoof(ci, y, b, wall, roofHex, r) {
-  const cell = cells[ci];
-  const nt = k => { const n = cell.nb[k]; return has(n, y) && !has(n, y + 1) ? 1 : 0; };
-  const a0 = nt(0) + nt(2), a1 = nt(1) + nt(3);
-  const roof = lin(roofHex, 0.95 + r(2) * 0.1);
-  const supported = y === 0 || has(ci, y - 1);
-  if (a0 > 0 && a1 > 0 && a0 + a1 >= 3) {
-    ub(cell, y, 0, 1, 0, 1, 1, 1.03, lin(C.flat), 'main', SKIP_BOTTOM);
-    for (let k = 0; k < 4; k++) if (!nt(k)) fb(cell, y, k, 0, 1, 0, 0.08, 1, 1.17, wall);
-    const g = r(5);
-    if (g < 0.2) ub(cell, y, 0.3, 0.55, 0.35, 0.6, 1.03, 1.35, lin(C.stone));
-    else if (g < 0.4) {
-      ub(cell, y, 0.2, 0.8, 0.2, 0.8, 1.03, 1.1, lin(C.grass));
-      ub(cell, y, 0.35, 0.5, 0.4, 0.55, 1.1, 1.28, lin(C.leaf));
+// ---------- M5: corner-based architecture ----------
+const UVM = [[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]];   // edge midpoints in a cell's unit square
+const RISE = 0.52, DROP = 0.07, OVER = 0.1, RT = 0.07, QUAY = 0.17, ARCH = 0.64;
+// level 0 is the paved street that sits just above the harbour water; houses start at level 1
+const WATER = 0.75, GROUND = 1, GROUND_ROUND = 0.3, EDGE = 0.06;
+const onStreet = (v, y) => y === 1 && has(v, 0);
+// where a floor with nothing directly under it can rest its piers: the next floor down, the street, or the sea bed
+function supportBase(v, y) {
+  for (let k = y - 1; k >= 0; k--) if (has(v, k)) return k + 1;
+  return WATER - 0.35;
+}
+const nx4 = k => (k + 1) & 3, pv4 = k => (k + 3) & 3;
+const xz = (cell, u, v) => { const p = W(cell, u, v, 0); return [p[0], p[2]]; };
+
+let doorCache = new Map(), isoCache = new Map(), gableCache = new Map(), stairCache = new Map();
+function isolated(v, y) {
+  const k = keyOf(v, y);
+  if (!isoCache.has(k)) isoCache.set(k, !vAdj[v].some(n => has(n, y)));
+  return isoCache.get(k);
+}
+function doorOf(v) {
+  if (!doorCache.has(v)) {
+    let best = -1, bh = 2;
+    // prefer a side that opens onto a street, otherwise the quay edge
+    for (const n of vAdj[v]) if (!has(n, 1)) { const h = hash(Math.min(v, n), Math.max(v, n), 5, 5) + (has(n, 0) ? 0 : 1); if (h < bh) { bh = h; best = n; } }
+    doorCache.set(v, best);
+  }
+  return doorCache.get(v);
+}
+// gable ends: the neighbours whose shared wall rises into a gable instead of a hipped slope.
+// A lone low house becomes a gabled cottage; the last house of a row often ends in a gable.
+const dirTo = (a, b) => norm2(sub2(VERTS[b], VERTS[a]));
+function gableOf(v, y) {
+  const key = keyOf(v, y);
+  if (gableCache.has(key)) return gableCache.get(key);
+  let out = [];
+  if (!has(v, y + 1)) {
+    const conn = vAdj[v].filter(n => has(n, y)), open = vAdj[v].filter(n => !has(n, y));
+    const tower = y >= 2 && has(v, y - 1);
+    if (conn.length === 0 && !tower && open.length >= 2 && hash(v, y, 17, 1) < 0.8) {
+      // pick the most opposite pair of neighbours as the ridge axis
+      let best = -2, pair = null;
+      for (let i = 0; i < open.length; i++) for (let j = i + 1; j < open.length; j++) {
+        const da = dirTo(v, open[i]), db = dirTo(v, open[j]), d = -(da[0] * db[0] + da[1] * db[1]);
+        if (d > best) { best = d; pair = [open[i], open[j]]; }
+      }
+      if (pair && best > 0.5) out = pair;
+    } else if (conn.length === 1 && hash(v, y, 17, 2) < 0.65) {
+      const back = dirTo(conn[0], v);
+      let best = 0.55, u = -1;
+      for (const n of open) { const d = dirTo(v, n), dot = d[0] * back[0] + d[1] * back[1]; if (dot > best) { best = dot; u = n; } }
+      if (u >= 0) out = [u];
+    }
+  }
+  gableCache.set(key, out);
+  return out;
+}
+const isGable = (v, y, u) => gableOf(v, y).includes(u);
+// exterior staircase: climbs along one long side of a two-storey house to a door on the first floor
+function stairOf(v) {
+  if (!stairCache.has(v)) {
+    let best = -1;
+    if (has(v, 0) && has(v, 1) && has(v, 2) && hash(v, 0, 19, 1) < 0.4) {
+      let bh = 2;
+      for (const n of vAdj[v]) {
+        if (has(n, 1) || has(n, 2) || n === doorOf(v)) continue;
+        const h = hash(Math.min(v, n), Math.max(v, n), 19, 2);
+        if (h < bh) { bh = h; best = n; }
+      }
+    }
+    stairCache.set(v, best);
+  }
+  return stairCache.get(v);
+}
+// corner rounding is a per-house trait, constant up the whole column
+function roundOf(v, y) {
+  if (y >= 2 && isolated(v, y)) return gableOf(v, y).length ? 0.07 : 0.42;
+  if (y === 1 && isolated(v, y) && gableOf(v, y).length) return 0.07;
+  return [0.07, 0.2, 0.26, 0.36][Math.floor(hash(v, 0, 9, 9) * 4)];
+}
+function apexOf(v, y) {
+  const Hr = y + 1 + RISE;
+  if (!isolated(v, y) || gableOf(v, y).length) return Hr;
+  const r = hash(v, y, 11, 3);
+  return y >= 2 && has(v, y - 1) ? Hr + 0.4 + r * 0.5 : Hr + r * 0.2;
+}
+const toneOf = (v, y) => 0.95 + hash(v, y, 1, 1) * 0.08;
+
+// connected roofs are split into small regions that share one roof colour,
+// so a row of houses reads as a few buildings instead of a patchwork
+const ROOF_TONES = ['#b5563f', '#c0654a', '#a94f45', '#8e4b55', '#4f5d66', '#3d5878', '#3f6b66', '#5b4a7a', '#8a4a2f', '#b5563f', '#c0654a', '#4f5d66'];
+let roofCache = new Map();
+function computeRoofRegions() {
+  roofCache = new Map();
+  const tops = [...blocks.keys()].map(parseKey).filter(([v, y]) => y >= 1 && !has(v, y + 1)).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  for (const [v0, y] of tops) {
+    if (roofCache.has(keyOf(v0, y))) continue;
+    const size = 3 + Math.floor(hash(v0, y, 13, 1) * 5);
+    const col = ROOF_TONES[Math.floor(hash(v0, y, 13, 2) * ROOF_TONES.length)];
+    const q = [v0];
+    roofCache.set(keyOf(v0, y), col);
+    let n = 1;
+    while (q.length && n < size) {
+      const v = q.shift();
+      for (const w of vAdj[v]) {
+        const k = keyOf(w, y);
+        if (n >= size || roofCache.has(k) || !has(w, y) || has(w, y + 1)) continue;
+        roofCache.set(k, col); q.push(w); n++;
+      }
+    }
+  }
+}
+const roofOf = (v, y) => roofCache.get(keyOf(v, y)) || '#b5563f';
+
+let pickP = [], pickMeta = [];
+function pickQuad(a, b, c, d, meta) { pickP.push(...a, ...b, ...c, ...a, ...c, ...d); pickMeta.push(meta, meta); }
+function pickTri(a, b, c, meta) { pickP.push(...a, ...b, ...c); pickMeta.push(meta); }
+
+function emitCellLevel(ci, y) {
+  if (y === 0) { emitGroundCell(ci); return; }
+  const cell = cells[ci], vv = cell.v;
+  const f = vv.map(v => has(v, y));
+  if (!f.some(Boolean)) return;
+  const sup = vv.map(v => has(v, y - 1));
+  const fa = vv.map(v => has(v, y + 1));
+  const C = xz(cell, 0.5, 0.5), Mp = UVM.map(m => xz(cell, m[0], m[1])), Vp = cell.q;
+  const Qc = [0, 1, 2, 3].map(q => [(Vp[q][0] + Mp[q][0] + C[0] + Mp[pv4(q)][0]) / 4, (Vp[q][1] + Mp[q][1] + C[1] + Mp[pv4(q)][1]) / 4]);
+  const all4 = f.every(Boolean);
+  const convex = q => f[q] && !f[nx4(q)] && !f[pv4(q)];
+  const wallAt = k => f[k] !== f[nx4(k)];
+  const rc = q => roundOf(vv[q], y);
+  const trimP = k => convex(k) ? l2(C, Mp[k], rc(k)) : convex(nx4(k)) ? l2(C, Mp[k], rc(nx4(k))) : C;
+
+  // walls: straight half-walls on the cell's midlines, plus rounded corners
+  const segs = [];
+  for (let k = 0; k < 4; k++) if (wallAt(k)) {
+    const own = f[k] ? k : nx4(k), a = Mp[k], b = trimP(k);
+    segs.push({ a, b, own, k, curve: false, n: outward(a, b, Qc[own]) });
+  }
+  const curves = {};
+  for (let q = 0; q < 4; q++) if (convex(q)) {
+    const A = l2(C, Mp[q], rc(q)), B = l2(C, Mp[pv4(q)], rc(q)), pts = [], N = 6;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+      pts.push([a * A[0] + b * C[0] + c * B[0], a * A[1] + b * C[1] + c * B[1]]);
+    }
+    curves[q] = pts;
+    for (let i = 0; i < N; i++) segs.push({ a: pts[i], b: pts[i + 1], own: q, curve: true, n: outward(pts[i], pts[i + 1], Qc[q]) });
+  }
+  // eave/quay offset at the cell centre: mitre of the straight walls meeting there
+  let cm = [0, 0];
+  const straight = segs.filter(s => !s.curve && s.b === C);
+  for (const s of straight) { cm[0] += s.n[0]; cm[1] += s.n[1]; }
+  const cmu = norm2(cm);
+  const cmag = straight.length ? 1 / Math.max(0.55, cmu[0] * straight[0].n[0] + cmu[1] * straight[0].n[1]) : 0;
+  const cOff = [cmu[0] * cmag, cmu[1] * cmag];
+  const mInfo = k => {
+    const e = wallAt(k);
+    let off = [0, 0];
+    if (e) { const fil = f[k] ? k : nx4(k), emp = f[k] ? nx4(k) : k; off = norm2(sub2(Vp[emp], Vp[fil])); }
+    return { p: Mp[k], e, off };
+  };
+  const gab = (r, q, u) => ({ ...r, g: r.e && isGable(vv[q], y, u) });
+  const ringOf = q => {
+    const R = [gab(mInfo(q), q, vv[nx4(q)])];
+    if (curves[q]) {
+      const pts = curves[q];
+      for (let i = 0; i < pts.length; i++) R.push({ p: pts[i], e: true, off: outward(pts[Math.max(0, i - 1)], pts[Math.min(pts.length - 1, i + 1)], Qc[q]) });
+    } else R.push({ p: C, e: !all4, off: cOff });
+    R.push(gab(mInfo(pv4(q)), q, vv[pv4(q)]));
+    return R;
+  };
+
+  for (let q = 0; q < 4; q++) {
+    if (!f[q]) continue;
+    const v = vv[q], key = keyOf(v, y), b = blocks.get(key);
+    setTarget(key);
+    const R = ringOf(q), Vq = Vp[q];
+    if (!sup[q]) {
+      const ceil = lin(shade(b.c, 0.55));
+      for (let i = 0; i < R.length - 1; i++) face('main', [P3(Vq, y + ARCH), P3(R[i].p, y + ARCH), P3(R[i + 1].p, y + ARCH)], ceil, P3(Vq, y + 5));
+      for (let i = 0; i < R.length - 1; i++) pickTri(P3(Vq, y), P3(R[i].p, y), P3(R[i + 1].p, y), { v, y, t: 'bottom' });
+    }
+    if (!fa[q]) {
+      emitRoof(ci, q, y, v, b, R, Vq);
+      for (let i = 0; i < R.length - 1; i++) pickTri(P3(Vq, y + 1), P3(R[i].p, y + 1), P3(R[i + 1].p, y + 1), { v, y, t: 'top' });
+    }
+  }
+
+  for (const s of segs) {
+    const v = vv[s.own], key = keyOf(v, y);
+    setTarget(key);
+    emitWall(cell, y, s, v, blocks.get(key), sup[s.own], vv, cell);
+    const cands = s.curve ? [vv[nx4(s.own)], vv[pv4(s.own)]] : [f[s.k] ? vv[nx4(s.k)] : vv[s.k]];
+    pickQuad(P3(s.a, y), P3(s.b, y), P3(s.b, y + 1), P3(s.a, y + 1), { v, y, t: 'side', cands });
+  }
+  // a supported room next to an arcade shows its wall down into the arch
+  for (let k = 0; k < 4; k++) {
+    if (!f[k] || !f[nx4(k)] || sup[k] === sup[nx4(k)]) continue;
+    const own = sup[k] ? k : nx4(k), v = vv[own], key = keyOf(v, y);
+    setTarget(key);
+    const n = outward(Mp[k], C, Qc[own]), col = lin(blocks.get(key).c, toneOf(v, y) * 0.9);
+    const mid = l2(Mp[k], C, 0.5);
+    face('main', [P3(Mp[k], y - 0.06), P3(C, y - 0.06), P3(C, y + ARCH), P3(Mp[k], y + ARCH)], col, [mid[0] - n[0], y + 0.3, mid[1] - n[1]]);
+  }
+}
+
+function emitWall(cell, y, s, v, b, supported, vv) {
+  const col = lin(b.c, toneOf(v, y));
+  const L = Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]);
+  const F = { a: s.a, t: norm2(sub2(s.b, s.a)), n: s.n, L };
+  const ref = m => [m[0] - s.n[0] * 0.3, y + 0.5, m[1] - s.n[1] * 0.3];
+  const mid = l2(s.a, s.b, 0.5);
+  if (!s.curve) {
+    const other = vv[s.k] === v ? vv[nx4(s.k)] : vv[s.k];
+    if (isGable(v, y, other)) {
+      // the wall rises into a gable under the verge, with a small attic window at the joint
+      const Hr = y + 1 + RISE;
+      face('main', [P3(s.a, y + 1), P3(s.b, y + 1), P3(s.a, Hr - 0.01)], col, ref(mid));
+      if (L > 0.22) {
+        const lo = Math.min(v, other), hi = Math.max(v, other), lit = hash(lo, hi, y, 24) < 0.5 ? 'lit' : 'dark';
+        wb(F, 0, 0.075, 0, 0.025, y + 1.06, y + 1.3, lin(C.trim));
+        wb(F, 0, 0.045, 0, 0.034, y + 1.09, y + 1.27, lit === 'lit' ? [1, 1, 1] : lin(C.glass), lit);
+      }
+    }
+  }
+  if (supported) {
+    const street = onStreet(v, y);
+    const y0 = street ? y : y - 0.06, sb = street ? 0.8 : 1;
+    face('main', [P3(s.a, y0), P3(s.b, y0), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [sb, sb, 1, 1]);
+    if (street) wb(F, 0, L, -0.02, 0.022, y, y + 0.1, lin(shade(b.c, 0.82)));
+    if (!s.curve) emitFacade(y, s, F, v, b, vv, cell);
+    return;
+  }
+  // nothing directly below: the corners become piers that reach down to whatever is there
+  const base = supportBase(v, y), overWater = base < GROUND;
+  const footing = (s0, s1) => {
+    wb(F, s0, s1, -0.17, 0.05, WATER - 0.4, WATER + 0.14, lin(C.stone));
+    wb(F, s0, s1, -0.19, 0.07, WATER + 0.14, WATER + 0.2, lin(C.stoneLip));
+  };
+  if (s.curve) {
+    face('main', [P3(s.a, base), P3(s.b, base), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [0.7, 0.7, 1, 1]);
+    if (overWater) footing(0, L);
+    return;
+  }
+  const pier0 = 0.8 * L;
+  if (base < y) {
+    wb(F, pier0, L, -0.12, 0, base, y + 0.02, col);
+    wb(F, pier0 - 0.015, L, -0.13, 0.015, y - 0.06, y + 0.01, lin(C.trim));
+    if (overWater) footing(pier0 - 0.02, L);
+    else wb(F, pier0 - 0.02, L, -0.14, 0.02, base, base + 0.08, lin(shade(b.c, 0.8)));
+  }
+  face('main', [P3(s.a, y + ARCH), P3(s.b, y + ARCH), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid));
+  // smooth arch: the crown sits at the joint, so two neighbouring halves make one arch
+  const P = (sx, d, yy) => [F.a[0] + F.t[0] * sx + F.n[0] * d, yy, F.a[1] + F.t[1] * sx + F.n[1] * d];
+  const open = x => x < 0.8 ? 0.58 * Math.sqrt(Math.max(0, 1 - (x / 0.8) ** 2)) : 0;
+  const n = 14, inner = lin(shade(b.c, 0.7)), depth = 0.12, top = y + ARCH;
+  const inRef = [s.a[0] - s.n[0], y + 0.3, s.a[1] - s.n[1]];
+  for (let i = 0; i < n; i++) {
+    const x0 = i / n, x1 = (i + 1) / n, s0 = x0 * L, s1 = x1 * L;
+    const y0 = y + open(x0), y1 = y + open(x1);
+    face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, 0, top), P(s0, 0, top)], col, inRef);
+    face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, -depth, y1), P(s0, -depth, y0)], inner, [(F.a[0] + F.t[0] * s0), y + 3, (F.a[1] + F.t[1] * s0)]);
+    face('main', [P(s0, -depth, y0), P(s1, -depth, y1), P(s1, -depth, top), P(s0, -depth, top)], inner, [s.a[0] + s.n[0], y + 0.3, s.a[1] + s.n[1]]);
+  }
+  wb(F, 0, L, 0, 0.02, y + ARCH - 0.04, y + ARCH, lin(C.trim));
+}
+
+// window, door and shop details. s = 0 is the joint at the edge midpoint, shared with the
+// neighbouring cell, so a window centred there is drawn as two matching halves.
+function emitFacade(y, s, F, v, b, vv, cell) {
+  const L = F.L;
+  if (L < 0.14) return;
+  const va = vv[s.k], vb = vv[nx4(s.k)], lo = Math.min(va, vb), hi = Math.max(va, vb);
+  const other = va === v ? vb : va;
+  const trim = lin(C.trim), roofHex = ROOF_OF[b.c] || '#7a5a4a';
+  const lit = hash(lo, hi, y, 22) < 0.6 ? 'lit' : 'dark';
+  const gcol = lit === 'lit' ? [1, 1, 1] : lin(C.glass);
+
+  // exterior staircase: the lower half climbs from the quay to the joint, the upper half
+  // continues to a landing and a first-floor door at the far corner
+  if (stairOf(v) === other && (y === 1 || y === 2)) {
+    const role = cell.i < cell.nb[s.k] ? 'low' : 'high';
+    if (y === 1) { emitStairs(F, role, y); return; }
+    if (role === 'high' && L > 0.3) {
+      const s1 = L - 0.03, s0 = s1 - 0.19;
+      wb(F, s0 - 0.03, s1 + 0.02, 0, 0.025, y, y + 0.72, trim);
+      wb(F, s0, s1, 0, 0.04, y, y + 0.64, lin(C.wood));
+      wb(F, s0 + 0.02, s0 + 0.05, 0.04, 0.05, y + 0.3, y + 0.36, lin(C.gold));
+      wslab(F, s0 - 0.05, s1 + 0.04, 0, y + 0.82, 0.2, y + 0.73, 0.03, lin(roofHex));
+      wb(F, s0 - 0.1, s0 - 0.06, 0, 0.07, y + 0.5, y + 0.6, lin(C.lamp), 'lit');
+      return;
+    }
+  }
+
+  if (onStreet(v, y) && doorOf(v) === other) {
+    wb(F, 0, 0.21, 0, 0.025, y, y + 0.74, trim);
+    wb(F, 0, 0.16, 0, 0.04, y, y + 0.66, lin(C.wood));
+    wb(F, 0.02, 0.06, 0.04, 0.05, y + 0.3, y + 0.36, lin(C.gold));
+    wslab(F, 0, 0.28, 0, y + 0.84, 0.24, y + 0.74, 0.035, lin(roofHex));
+    wb(F, 0, 0.25, 0, 0.17, y, y + 0.05, lin(C.stoneLip));
+    if (L > 0.33) {
+      wb(F, 0.27, 0.32, 0, 0.07, y + 0.52, y + 0.62, lin(C.lamp), 'lit');
+      wb(F, 0.285, 0.305, 0, 0.07, y + 0.62, y + 0.66, lin(C.wood));
     }
     return;
   }
-  if (a0 + a1 === 0 && supported && y >= 1 && r(6) < 0.7) {
-    // spire on a lone tower
-    const h = 0.8 + r(3) * 0.5;
-    const e = [[-0.08, -0.08], [1.08, -0.08], [1.08, 1.08], [-0.08, 1.08]].map(([u, v]) => W(cell, u, v, y + 0.93));
-    const apex = W(cell, 0.5, 0.5, y + 1 + h), ref = W(cell, 0.5, 0.5, y + 1.15);
-    for (let k = 0; k < 4; k++) face('main', [e[k], e[(k + 1) % 4], apex], roof, ref, [0.85, 0.85, 1.05]);
-    face('main', e, lin(shade(roofHex, 0.6)), W(cell, 0.5, 0.5, y + 1.6));
-    ub(cell, y, 0.46, 0.54, 0.46, 0.54, 1 + h - 0.05, 1 + h + 0.18, lin(C.gold));
+  const h = hash(lo, hi, y, 21), h2 = hash(lo, hi, y, 23);
+  // dormer on the roof slope above this wall, centred on the joint like the windows
+  if (L > 0.3 && !has(v, y + 1) && !isolated(v, y) && !isGable(v, y, other) && hash(lo, hi, y, 31) < 0.22) {
+    const roofHexD = roofOf(v, y), base = y + 1;
+    wb(F, 0, 0.13, -0.42, -0.1, base - 0.05, base + 0.3, lin(b.c, toneOf(v, y)));
+    wb(F, 0, 0.1, -0.1, -0.085, base + 0.04, base + 0.26, trim);
+    wb(F, 0, 0.07, -0.088, -0.075, base + 0.07, base + 0.23, gcol, lit);
+    const P = (sx, d, yy) => [F.a[0] + F.t[0] * sx + F.n[0] * d, yy, F.a[1] + F.t[1] * sx + F.n[1] * d];
+    const rc = lin(roofHexD), ref = [F.a[0] - F.n[0] * 0.25, base, F.a[1] - F.n[1] * 0.25];
+    hexa('main', [P(0, -0.06, base + 0.42), P(0.18, -0.06, base + 0.28), P(0.18, -0.46, base + 0.28), P(0, -0.46, base + 0.42),
+                  P(0, -0.06, base + 0.46), P(0.18, -0.06, base + 0.32), P(0.18, -0.46, base + 0.32), P(0, -0.46, base + 0.46)], rc, [0.7, 0.7, 0.7, 0.7, 1, 1, 1, 1]);
+    face('main', [P(0, -0.1, base + 0.3), P(0.13, -0.1, base + 0.3), P(0, -0.1, base + 0.42)], lin(b.c, toneOf(v, y)), ref);
+  }
+  const sill = (s0, s1) => wb(F, s0, s1, 0, 0.08, y + 0.3, y + 0.35, trim);
+  const jointWindow = (half, y0 = 0.33, y1 = 0.8) => {
+    wb(F, 0, half + 0.04, 0, 0.025, y + y0, y + y1, trim);
+    wb(F, 0, half, 0, 0.034, y + y0 + 0.04, y + y1 - 0.04, gcol, lit);
+    wb(F, 0, 0.012, 0, 0.042, y + y0 + 0.04, y + y1 - 0.04, trim);
+  };
+  if (onStreet(v, y) && h < 0.28 && L > 0.3) {
+    // shopfront with a striped awning
+    const e = Math.min(L - 0.05, 0.42);
+    wb(F, 0, e, 0, 0.025, y + 0.1, y + 0.6, trim);
+    wb(F, 0, e - 0.04, 0, 0.034, y + 0.14, y + 0.56, gcol, lit);
+    const n = Math.max(2, Math.round(e / 0.075)), w = (e + 0.03) / n;
+    const stripe = [lin(C.trim), lin(PALETTE[Math.floor(h2 * PALETTE.length)].roof)];
+    for (let i = 0; i < n; i++) wslab(F, i * w, (i + 1) * w, 0, y + 0.74, 0.26, y + 0.62, 0.03, stripe[i & 1]);
     return;
   }
-  const k = a0 > a1 ? 0 : a1 > a0 ? 1 : (r(3) < 0.5 ? 0 : 1);
-  const P = (s, d, yy) => { const [u, v] = E(k, s, d); return W(cell, u, v, y + yy); };
-  prism('main', [P(0, 0, 1), P(1, 0, 1), P(0.5, 0, 1.5)], [P(0, 1, 1), P(1, 1, 1), P(0.5, 1, 1.5)], wall);
-  const dA = has(cell.nb[k], y) && !has(cell.nb[k], y + 1) ? -0.02 : -0.07;
-  const dB = has(cell.nb[(k + 2) % 4], y) && !has(cell.nb[(k + 2) % 4], y + 1) ? 1.02 : 1.07;
-  for (const se of [-0.09, 1.09]) {
-    const B = [P(0.5, dA, 1.5), P(se, dA, 0.91), P(se, dB, 0.91), P(0.5, dB, 1.5)];
-    const T = B.map(p => [p[0], p[1] + 0.07, p[2]]);
-    hexa('main', [...B, ...T], roof, 0, [0.62, 0.62, 0.62, 0.62, 1, 1, 1, 1]);
+  if (h < 0.5) {
+    jointWindow(0.11);
+    sill(0, 0.17);
+    if (h2 < 0.45 && L > 0.3) {
+      const sh = lin(shade(b.c, 0.7));
+      wb(F, 0.155, 0.255, 0, 0.04, y + 0.36, y + 0.77, sh);
+    } else if (h2 > 0.7) {
+      wb(F, 0, 0.16, 0, 0.1, y + 0.35, y + 0.42, lin(C.leaf));
+      for (const sx of [0.04, 0.11]) wb(F, sx, sx + 0.035, 0.05, 0.085, y + 0.42, y + 0.46, lin(h2 > 0.85 ? '#f2a7b5' : '#fbe7a1'));
+    }
+    return;
   }
-  fb(cell, y, k, 0.46, 0.54, dA, dB, 1.52, 1.6, lin(shade(roofHex, 0.78)));
-  if (r(4) < 0.35) {
-    const s = r(8) < 0.5 ? 0.2 : 0.68;
-    fb(cell, y, k, s, s + 0.12, 0.35, 0.47, 1.15, 1.75, lin(C.stone));
-    fb(cell, y, k, s - 0.02, s + 0.14, 0.33, 0.49, 1.75, 1.8, lin(shade(C.stone, 0.8)));
+  if (h < 0.74 && L > 0.34) {
+    const sc = L * 0.55;
+    wb(F, sc - 0.12, sc + 0.12, 0, 0.025, y + 0.35, y + 0.8, trim);
+    wb(F, sc - 0.08, sc + 0.08, 0, 0.034, y + 0.39, y + 0.76, gcol, lit);
+    wb(F, sc - 0.006, sc + 0.006, 0, 0.042, y + 0.39, y + 0.76, trim);
+    sill(sc - 0.15, sc + 0.15);
+    return;
+  }
+  if (h < 0.88 && y >= 2) {
+    // french window with a balcony
+    jointWindow(0.1, 0.03, 0.82);
+    wslab(F, 0, 0.3, 0, y + 0.02, 0.22, y + 0.02, 0.035, trim);
+    wb(F, 0, 0.3, 0.2, 0.22, y + 0.27, y + 0.29, trim);
+    wb(F, 0.28, 0.3, 0, 0.22, y + 0.27, y + 0.29, trim);
+    for (const sx of [0.03, 0.09, 0.15, 0.21, 0.28]) wb(F, sx, sx + 0.012, 0.2, 0.212, y + 0.055, y + 0.27, trim);
+    for (const d of [0.06, 0.13]) wb(F, 0.288, 0.3, d, d + 0.012, y + 0.055, y + 0.27, trim);
+    return;
+  }
+  if (h < 0.95) {
+    jointWindow(0.06, 0.5, 0.74);
+    return;
   }
 }
 
-function emitCourtyard(ci, trees) {
-  const cell = cells[ci];
-  ub(cell, 0, -0.02, 1.02, -0.02, 1.02, -0.5, 0.04, lin(C.grass), 'main', SKIP_BOTTOM);
-  if (hash(ci, 0, 3, 9) < 0.75) {
-    ub(cell, 0, 0.45, 0.55, 0.45, 0.55, 0.04, 0.45, lin(C.wood));
-    const p = W(cell, 0.5, 0.5, 0);
-    const s = 0.32 + hash(ci, 1, 2, 3) * 0.12;
-    trees.push([p[0], 0.62, p[2], s]);
-    trees.push([p[0] + 0.08, 0.86, p[2] - 0.05, s * 0.7]);
+function emitStairs(F, role, Y0) {
+  const L = F.L, low = role === 'low', D = 0.16;
+  const tread = lin(C.stoneLip), riser = lin(C.stone), rail = lin(C.trim);
+  const land = low ? 0 : Math.min(0.22, L * 0.4), run = L - land;
+  const hAt = x => Y0 + (low ? 0.5 * (1 - x) : 0.5 + 0.5 * x);
+  const n = Math.max(3, Math.round(run / 0.07));
+  for (let i = 0; i < n; i++) {
+    const x0 = i / n, x1 = (i + 1) / n, top = low ? hAt(x0) : hAt(x1);
+    hexa('main', [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0], [1, 0], [1, 1], [0, 1]].map(([si, di], j) => {
+      const sx = (si ? x1 : x0) * run, d = di ? D : 0, yy = j < 4 ? Y0 : top;
+      return [F.a[0] + F.t[0] * sx + F.n[0] * d, yy, F.a[1] + F.t[1] * sx + F.n[1] * d];
+    }), riser, [0.75, 0.75, 0.75, 0.75, 1.15, 1.15, 1.15, 1.15]);
+    wb(F, x0 * run, x1 * run, 0, D + 0.01, top - 0.02, top, tread);
+  }
+  if (!low) {
+    wb(F, run, L, 0, D + 0.03, Y0, Y0 + 1, riser);
+    wb(F, run - 0.01, L, 0, D + 0.04, Y0 + 0.97, Y0 + 1.01, tread);
+    wb(F, run - 0.01, L, D + 0.02, D + 0.04, Y0 + 1.01, Y0 + 1.3, rail);
+  }
+  // railing: posts and a sloped handrail along the outer edge
+  const top0 = hAt(0), top1 = hAt(1);
+  for (let i = 0; i <= 3; i++) {
+    const x = i / 3, sx = x * run;
+    wb(F, sx - 0.008, sx + 0.008, D - 0.02, D - 0.004, hAt(x), hAt(x) + 0.28, rail);
+  }
+  wseg(F, 0, top0 + 0.27, run, top1 + 0.27, D - 0.024, D, 0.025, rail);
+}
+
+function emitRoof(ci, q, y, v, b, R, Vq) {
+  const roofHex = roofOf(v, y);
+  const Hr = y + 1 + RISE, E = y + 1 - DROP, HV = apexOf(v, y);
+  const roof = lin(roofHex, 0.95 + hash(v, y, 2, 2) * 0.1);
+  const pt = r => r.g ? [r.p[0] + r.off[0] * OVER, Hr, r.p[1] + r.off[1] * OVER]
+    : r.e ? [r.p[0] + r.off[0] * OVER, E + RT, r.p[1] + r.off[1] * OVER] : [r.p[0], Hr, r.p[1]];
+  const apex = [Vq[0], HV, Vq[1]], below = [Vq[0], y + 0.3, Vq[1]];
+  const flat = R.every(r => !r.e) && HV === Hr;
+  if (flat) {
+    // the inside of a big block becomes a roof terrace, sometimes a garden
+    const g = hash(v, y, ci, 4);
+    const col = g < 0.35 ? lin(C.grass) : lin(roofHex, 0.86);
+    for (let i = 0; i < R.length - 1; i++) face('main', [apex, pt(R[i]), pt(R[i + 1])], col, below);
+    if (g < 0.35 && hash(v, y, ci, 5) < 0.5) {
+      const p = l2(Vq, R[1].p, 0.5);
+      boxAt(p[0], p[1], 0.07, Hr, Hr + 0.16, lin(C.leaf));
+    } else if (g > 0.8) {
+      const p = l2(Vq, R[1].p, 0.45);
+      boxAt(p[0], p[1], 0.05, Hr, Hr + 0.1, lin('#c9876b'));
+      boxAt(p[0], p[1], 0.06, Hr + 0.1, Hr + 0.2, lin(C.leaf));
+    }
+    return;
+  }
+  const fasc = lin(shade(roofHex, 0.72)), soff = lin(shade(b.c, 0.6));
+  for (let i = 0; i < R.length - 1; i++) {
+    const a = pt(R[i]), c = pt(R[i + 1]);
+    face('main', [apex, a, c], roof, below, [1.07, 0.93, 0.93]);
+    if (R[i].e && R[i + 1].e) {
+      const ao = [a[0], a[1] - RT, a[2]], co = [c[0], c[1] - RT, c[2]];
+      const wallY = r => r.g ? Hr - RT - 0.02 : y + 1;
+      face('main', [ao, co, c, a], fasc, [Vq[0], E, Vq[1]]);
+      face('main', [ao, co, P3(R[i + 1].p, wallY(R[i + 1])), P3(R[i].p, wallY(R[i]))], soff, [(a[0] + c[0]) / 2, y + 6, (a[2] + c[2]) / 2]);
+    }
+  }
+  const primary = vCells[v][0][0] === ci;
+  if (!primary) return;
+  if (HV > Hr + 0.3) {
+    boxAt(Vq[0], Vq[1], 0.035, HV - 0.05, HV + 0.12, lin(C.gold));
+    boxAt(Vq[0], Vq[1], 0.012, HV + 0.12, HV + 0.32, lin(C.gold));
+  } else if (!isolated(v, y) && hash(v, y, 6, 6) < 0.32) {
+    const p = l2(Vq, R[0].p, 0.42);
+    boxAt(p[0], p[1], 0.065, y + 1.05, Hr + 0.22, lin(C.stone));
+    boxAt(p[0], p[1], 0.085, Hr + 0.22, Hr + 0.27, lin(shade(C.stone, 0.82)));
+  }
+}
+
+// ---------- the street layer ----------
+const PAVERS = ['#ddd5c7', '#d2c9b9', '#e4dccd', '#cbc2b1', '#d8cfbf'];
+function emitGroundCell(ci) {
+  const cell = cells[ci], vv = cell.v;
+  const f = vv.map(v => has(v, 0));
+  if (!f.some(Boolean)) return;
+  const C = xz(cell, 0.5, 0.5), Mp = UVM.map(m => xz(cell, m[0], m[1])), Vp = cell.q;
+  const Qc = [0, 1, 2, 3].map(q => [(Vp[q][0] + Mp[q][0] + C[0] + Mp[pv4(q)][0]) / 4, (Vp[q][1] + Mp[q][1] + C[1] + Mp[pv4(q)][1]) / 4]);
+  const all4 = f.every(Boolean);
+  const convex = q => f[q] && !f[nx4(q)] && !f[pv4(q)];
+  const wallAt = k => f[k] !== f[nx4(k)];
+  const trimmed = k => convex(k) || convex(nx4(k));
+  let cm = [0, 0], first = null;
+  for (let k = 0; k < 4; k++) if (wallAt(k) && !trimmed(k)) {
+    const n = outward(Mp[k], C, Qc[f[k] ? k : nx4(k)]);
+    cm[0] += n[0]; cm[1] += n[1]; first = first || n;
+  }
+  const cmu = norm2(cm), cmag = first ? 1 / Math.max(0.55, cmu[0] * first[0] + cmu[1] * first[1]) : 0;
+  const cOff = [cmu[0] * cmag, cmu[1] * cmag];
+  const mInfo = k => {
+    const e = wallAt(k);
+    let off = [0, 0];
+    if (e) { const fil = f[k] ? k : nx4(k), emp = f[k] ? nx4(k) : k; off = norm2(sub2(Vp[emp], Vp[fil])); }
+    return { p: Mp[k], e, off };
+  };
+  const grout = lin('#a99f8f'), stone = lin(C.stone), curb = lin(C.stoneLip);
+  for (let q = 0; q < 4; q++) {
+    if (!f[q]) continue;
+    const v = vv[q], key = keyOf(v, 0), Vq = Vp[q];
+    setTarget(key);
+    const R = [mInfo(q)];
+    if (convex(q)) {
+      const A = l2(C, Mp[q], GROUND_ROUND), B = l2(C, Mp[pv4(q)], GROUND_ROUND), N = 6, pts = [];
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+        pts.push([a * A[0] + b * C[0] + c * B[0], a * A[1] + b * C[1] + c * B[1]]);
+      }
+      for (let i = 0; i <= N; i++) R.push({ p: pts[i], e: true, off: outward(pts[Math.max(0, i - 1)], pts[Math.min(N, i + 1)], Qc[q]) });
+    } else R.push({ p: C, e: !all4, off: cOff });
+    R.push(mInfo(pv4(q)));
+    const pt = (r, o = EDGE) => r.e ? [r.p[0] + r.off[0] * o, r.p[1] + r.off[1] * o] : r.p;
+    for (let i = 0; i < R.length - 1; i++) {
+      const a = pt(R[i]), c = pt(R[i + 1]);
+      face('main', [P3(Vq, GROUND), P3(a, GROUND), P3(c, GROUND)], grout, P3(Vq, 0));
+      pickTri(P3(Vq, GROUND), P3(a, GROUND), P3(c, GROUND), { v, y: 0, t: 'top' });
+      if (R[i].e && R[i + 1].e) {
+        // quay wall with a light kerb, foam where it meets the water
+        face('main', [P3(a, GROUND), P3(c, GROUND), P3(c, 0.1), P3(a, 0.1)], stone, P3(Vq, 0.5), [1, 1, 0.62, 0.62]);
+        const ak = pt(R[i], EDGE + 0.025), ck = pt(R[i + 1], EDGE + 0.025);
+        hexa('main', [P3(R[i].p, GROUND - 0.06), P3(R[i + 1].p, GROUND - 0.06), P3(ck, GROUND - 0.06), P3(ak, GROUND - 0.06),
+                      P3(R[i].p, GROUND + 0.025), P3(R[i + 1].p, GROUND + 0.025), P3(ck, GROUND + 0.025), P3(ak, GROUND + 0.025)], curb);
+        const fa = pt(R[i], EDGE + 0.32), fc = pt(R[i + 1], EDGE + 0.32);
+        face('foam', [P3(a, WATER + 0.12), P3(c, WATER + 0.12), P3(fc, WATER + 0.12), P3(fa, WATER + 0.12)], lin(C.foam), P3(Vq, -2));
+        pickQuad(P3(a, WATER), P3(c, WATER), P3(c, GROUND), P3(a, GROUND), { v, y: 0, t: 'side', cands: [vv[nx4(q)], vv[pv4(q)]] });
+      }
+    }
+    if (has(v, 1) || isCourtyard(v)) continue;
+    // cobbled paving: a 3x3 grid of slightly irregular stones over the grout
+    const A = Vq, B = Mp[q], Cc = C, D = Mp[pv4(q)];
+    const P = (u, w) => [A[0] * (1 - u) * (1 - w) + B[0] * u * (1 - w) + Cc[0] * u * w + D[0] * (1 - u) * w,
+                         A[1] * (1 - u) * (1 - w) + B[1] * u * (1 - w) + Cc[1] * u * w + D[1] * (1 - u) * w];
+    const n = 3, g = 0.05;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      if (convex(q) && i === n - 1 && j === n - 1) continue;
+      const u0 = i / n + g, u1 = (i + 1) / n - g, w0 = j / n + g, w1 = (j + 1) / n - g;
+      const h = hash(ci, q * 16 + i * 4 + j, 3, 3), top = GROUND + 0.012 + h * 0.008;
+      const col = lin(PAVERS[Math.floor(h * PAVERS.length)], 0.97 + hash(ci, q, i, j) * 0.06);
+      const corners = [P(u0, w0), P(u1, w0), P(u1, w1), P(u0, w1)];
+      hexa('main', [...corners.map(c => P3(c, GROUND - 0.01)), ...corners.map(c => P3(c, top))], col, [0.8, 0.8, 0.8, 0.8, 1, 1, 1, 1]);
+    }
+    // street furniture on some rounded corners
+    if (convex(q) && hash(v, ci, 7, 7) < 0.3) {
+      const r = R[Math.floor(R.length / 2)], p = pt(r, EDGE - 0.1);
+      const iron = lin('#4a5560');
+      boxAt(p[0], p[1], 0.028, GROUND, GROUND + 0.07, iron);
+      boxAt(p[0], p[1], 0.011, GROUND + 0.07, GROUND + 0.5, iron);
+      boxAt(p[0], p[1], 0.032, GROUND + 0.5, GROUND + 0.58, lin(C.lamp), 'lit');
+      boxAt(p[0], p[1], 0.042, GROUND + 0.58, GROUND + 0.6, iron);
+    }
+  }
+}
+// a street tile hemmed in by houses on every side becomes a little garden
+function isCourtyard(v) {
+  return has(v, 0) && !has(v, 1) && vAdj[v].length > 0 && vAdj[v].every(n => has(n, 1));
+}
+
+function emitCourtyard(v, trees) {
+  const grass = lin(C.grass), G = GROUND + 0.02;
+  for (const [ci, k] of vCells[v]) {
+    const cell = cells[ci], Vp = cell.q[k];
+    const a = xz(cell, UVM[k][0], UVM[k][1]), c = xz(cell, 0.5, 0.5), d = xz(cell, UVM[pv4(k)][0], UVM[pv4(k)][1]);
+    face('main', [P3(Vp, G), P3(a, G), P3(c, G), P3(d, G)], grass, P3(Vp, 0));
+  }
+  const [x, z] = VERTS[v], r = hash(v, 0, 3, 9);
+  if (r < 0.7) {
+    boxAt(x, z, 0.05, G, G + 0.43, lin(C.wood));
+    const s = 0.3 + hash(v, 1, 2, 3) * 0.12;
+    trees.push([x, G + 0.6, z, s], [x + 0.08, G + 0.84, z - 0.05, s * 0.7]);
   } else {
-    for (const [u, v] of [[0.25, 0.3], [0.7, 0.65], [0.3, 0.72]]) ub(cell, 0, u, u + 0.08, v, v + 0.08, 0.04, 0.12, lin('#f2a7b5'));
+    // a little well
+    boxAt(x, z, 0.14, G, G + 0.19, lin(C.stoneLip));
+    boxAt(x, z, 0.1, G + 0.17, G + 0.195, lin('#4f7fa0'));
+    for (const [dx, dz] of [[-0.17, 0.12], [0.15, -0.16], [0.16, 0.15]]) boxAt(x + dx, z + dz, 0.035, G, G + 0.08, lin(dx > 0 ? '#f2a7b5' : '#fbe7a1'));
   }
 }
 
@@ -506,15 +921,16 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog('#e6f2ef', 60, 170);
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 800);
-camera.position.set(24, 23, 30);
+camera.position.set(24, 24, 30);
 const controls = new OrbitControls(camera, canvas);
-controls.target.set(0, 1, 1);
+controls.target.set(0, 2, 1);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = 1.42;
 controls.minDistance = 5;
 controls.maxDistance = 85;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+window.harbourView = (x, y, z, tx = 0, ty = 1, tz = 0) => { camera.position.set(x, y, z); controls.target.set(tx, ty, tz); };
 
 const hemi = new THREE.HemisphereLight('#fdf6ec', '#7fb2bf', 1.5);
 scene.add(hemi);
@@ -538,13 +954,13 @@ const waterGeo = new THREE.PlaneGeometry(400, 400, 130, 130).rotateX(-Math.PI / 
 const waterBase = waterGeo.attributes.position.array.slice();
 const waterMat = new THREE.MeshStandardMaterial({ color: '#7fc1cf', roughness: 0.28, metalness: 0.08, flatShading: true });
 const water = new THREE.Mesh(waterGeo, waterMat);
-water.position.y = -0.25;
+water.position.y = WATER;
 water.receiveShadow = true;
 scene.add(water);
 
 // grid lines that brighten around the cursor
 const gridPos = [];
-for (const [a, b] of GRID.edges) gridPos.push(GRID.V[a][0], -0.09, GRID.V[a][1], GRID.V[b][0], -0.09, GRID.V[b][1]);
+for (const [a, b] of GRID.edges) gridPos.push(GRID.V[a][0], WATER + 0.16, GRID.V[a][1], GRID.V[b][0], WATER + 0.16, GRID.V[b][1]);
 const gridGeo = new THREE.BufferGeometry();
 gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(gridPos, 3));
 const gridMat = new THREE.ShaderMaterial({
@@ -584,21 +1000,25 @@ function meshesFrom(m, pivot) {
 function disposeGroup(g) { g.traverse(o => { if (o.geometry && o.geometry !== treeGeo) o.geometry.dispose(); if (o.isInstancedMesh) o.dispose(); }); }
 
 let townObj = new THREE.Group(); scene.add(townObj);
-let pickMesh = null, pickMeta = [];
+let pickMesh = null;
 const pickMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, colorWrite: false, depthWrite: false, transparent: true, opacity: 0 });
 
 function rebuild() {
   disposeGroup(townObj); scene.remove(townObj);
   if (anim.obj) { disposeGroup(anim.obj); scene.remove(anim.obj); anim.obj = null; }
-  M = newMesh();
-  const trees = [];
-  for (const [k, b] of blocks) {
-    if (k === anim.key) continue;
-    const [ci, y] = parseKey(k);
-    emitBlock(ci, y, b);
+  MB = newMesh(); MA = anim.key && blocks.has(anim.key) ? newMesh() : null; M = MB;
+  doorCache = new Map(); isoCache = new Map(); gableCache = new Map(); stairCache = new Map();
+  computeRoofRegions();
+  pickP = []; pickMeta = [];
+  const trees = [], todo = new Set();
+  for (const k of blocks.keys()) {
+    const [v, y] = parseKey(k);
+    for (const [ci] of vCells[v]) todo.add(ci * 64 + y);
   }
-  for (let ci = 0; ci < cells.length; ci++) if (isCourtyard(ci)) emitCourtyard(ci, trees);
-  townObj = meshesFrom(M);
+  for (const code of todo) emitCellLevel(Math.floor(code / 64), code % 64);
+  M = MB;
+  for (let v = 0; v < VERTS.length; v++) if (isCourtyard(v)) emitCourtyard(v, trees);
+  townObj = meshesFrom(MB);
   if (trees.length) {
     const im = new THREE.InstancedMesh(treeGeo, treeMat, trees.length);
     const m4 = new THREE.Matrix4(), col = new THREE.Color();
@@ -610,34 +1030,15 @@ function rebuild() {
     townObj.add(im);
   }
   scene.add(townObj);
-
-  if (anim.key) {
-    const [ci, y] = parseKey(anim.key);
-    M = newMesh();
-    emitBlock(ci, y, blocks.get(anim.key));
-    const c = cells[ci].c;
-    anim.obj = meshesFrom(M, [c[0], y, c[1]]);
+  if (MA) {
+    const [v, y] = parseKey(anim.key);
+    anim.obj = meshesFrom(MA, [VERTS[v][0], y, VERTS[v][1]]);
     scene.add(anim.obj);
   }
-
-  // invisible prisms for picking: top, sides and undersides of every block
-  const pp = []; pickMeta = [];
-  const quad = (a, b, c, d, meta) => { pp.push(...a, ...b, ...c, ...a, ...c, ...d); pickMeta.push(meta, meta); };
-  for (const k of blocks.keys()) {
-    const [ci, y] = parseKey(k), cell = cells[ci];
-    const Q = (u, v, yy) => W(cell, u, v, yy);
-    if (!has(ci, y + 1)) quad(Q(0, 0, y + 1), Q(1, 0, y + 1), Q(1, 1, y + 1), Q(0, 1, y + 1), { ci, y, t: 'top' });
-    if (y > 0 && !has(ci, y - 1)) quad(Q(0, 0, y), Q(1, 0, y), Q(1, 1, y), Q(0, 1, y), { ci, y, t: 'bottom' });
-    for (let e = 0; e < 4; e++) {
-      if (has(cell.nb[e], y)) continue;
-      const [u0, v0] = E(e, 0, 0), [u1, v1] = E(e, 1, 0);
-      quad(Q(u0, v0, y), Q(u1, v1, y), Q(u1, v1, y + 1), Q(u0, v0, y + 1), { ci, y, t: 'side', k: e });
-    }
-  }
   if (pickMesh) { pickMesh.geometry.dispose(); scene.remove(pickMesh); pickMesh = null; }
-  if (pp.length) {
+  if (pickP.length) {
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pp, 3));
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pickP, 3));
     pickMesh = new THREE.Mesh(g, pickMat);
     scene.add(pickMesh);
   }
@@ -647,7 +1048,7 @@ function rebuild() {
 }
 
 // ---------- persistence & history ----------
-const STORE = 'pastel-harbour-v2';
+const STORE = 'pastel-harbour-v4';
 const snapshot = () => JSON.stringify([...blocks]);
 function save() { try { localStorage.setItem(STORE, JSON.stringify({ grid: GRID_SEED, n: HEX_N, blocks: [...blocks] })); } catch (e) {} }
 function load() {
@@ -677,41 +1078,58 @@ function redo() {
 }
 
 // ---------- sample town ----------
+function graphPath(a, b) {
+  const prev = new Map([[a, -1]]), q = [a];
+  while (q.length) {
+    const v = q.shift();
+    if (v === b) break;
+    for (const n of vAdj[v]) if (!prev.has(n) && !vFixed[n]) { prev.set(n, v); q.push(n); }
+  }
+  const path = [];
+  for (let v = b; v !== -1 && prev.has(v); v = prev.get(v)) path.push(v);
+  return path.reverse();
+}
 function sampleTown(seed) {
   const m = new Map(), rnd = mulberry32(seed);
   const pick = () => PALETTE[Math.floor(rnd() * PALETTE.length)].wall;
   const ang = rnd() * Math.PI * 2;
   const isles = [
-    { x: Math.cos(ang) * 2, z: Math.sin(ang) * 2, r: 5.5, h: 4 },
-    { x: Math.cos(ang + 2.2) * 8, z: Math.sin(ang + 2.2) * 8, r: 3.8, h: 3 },
-    { x: Math.cos(ang - 2.0) * 8.5, z: Math.sin(ang - 2.0) * 8.5, r: 3.2, h: 2 },
+    { x: Math.cos(ang) * 2, z: Math.sin(ang) * 2, r: 5.2, h: 4 },
+    { x: Math.cos(ang + 2.2) * 8.5, z: Math.sin(ang + 2.2) * 8.5, r: 3.6, h: 3 },
+    { x: Math.cos(ang - 2.0) * 9, z: Math.sin(ang - 2.0) * 9, r: 3, h: 2 },
   ];
+  // every island vertex is paved; winding lanes stay open, the rest carries houses
+  const ph = [rnd() * 6.28, rnd() * 6.28, rnd() * 6.28];
+  const lane = (x, z) => Math.abs(Math.sin(x * 0.75 + ph[0]) + Math.cos(z * 0.7 + ph[1]) + 0.6 * Math.sin((x - z) * 0.45 + ph[2])) < 0.38;
   const heightOf = new Map();
-  for (let ci = 0; ci < cells.length; ci++) {
-    const [cx, cz] = cells[ci].c;
+  for (let v = 0; v < VERTS.length; v++) {
+    if (vFixed[v]) continue;
+    const [x, z] = VERTS[v];
     for (const s of isles) {
-      const d = Math.hypot(cx - s.x, cz - s.z) + (rnd() - 0.5) * 1.8;
+      const d = Math.hypot(x - s.x, z - s.z) + (rnd() - 0.5) * 1.6;
       if (d >= s.r) continue;
-      if (d > 1.6 && d < s.r - 1.2 && rnd() < 0.09) break; // leaves room for courtyards
-      let H = Math.max(1, Math.round(s.h * (1 - d / s.r) + rnd() * 1.4));
-      if (d < 0.9) H = s.h + 2;
-      heightOf.set(ci, Math.max(heightOf.get(ci) || 0, H));
+      m.set(keyOf(v, 0), { c: '#ddd5c7' });
+      if (lane(x, z) || (d > s.r - 0.9 && rnd() < 0.35)) break;   // streets and open quays
+      let H = Math.max(1, Math.round(s.h * (1 - d / s.r) + rnd() * 1.3));
+      if (d < 0.7) H = s.h + 2;
+      heightOf.set(v, Math.max(heightOf.get(v) || 0, H));
       break;
     }
   }
-  for (const [ci, H] of heightOf) {
+  for (const [v, H] of heightOf) {
     let c = pick();
-    for (let y = 0; y < H; y++) { if (rnd() < 0.22) c = pick(); m.set(keyOf(ci, y), { c }); }
+    for (let y = 1; y <= H; y++) { if (rnd() < 0.2) c = pick(); m.set(keyOf(v, y), { c }); }
   }
+  // arcades over a few lanes: an upper floor bridging the street between two houses
+  for (const [v, H] of heightOf) {
+    if (H < 2 || rnd() > 0.25) continue;
+    for (const n of vAdj[v]) if (m.has(keyOf(n, 0)) && !heightOf.has(n) && vAdj[n].some(w => w !== v && (heightOf.get(w) || 0) >= 2)) { m.set(keyOf(n, 2), { c: m.get(keyOf(v, 2)).c }); break; }
+  }
+  // bridges between the islands: a floor at level 1 standing on piers in the water
   for (const [a, b, col] of [[0, 1, '#f4f1ec'], [0, 2, '#f2d0a4']]) {
-    const A = isles[a], B = isles[b];
-    let prev = -1;
-    for (let t = 0; t <= 1; t += 0.01) {
-      const ci = cellAt(A.x + (B.x - A.x) * t, A.z + (B.z - A.z) * t);
-      if (ci < 0 || ci === prev) continue;
-      prev = ci;
-      if (!m.has(keyOf(ci, 0))) m.set(keyOf(ci, 1), { c: col });
-    }
+    const va = vertexAt(isles[a].x, isles[a].z, 3), vb = vertexAt(isles[b].x, isles[b].z, 3);
+    if (va < 0 || vb < 0) continue;
+    for (const v of graphPath(va, vb)) if (!m.has(keyOf(v, 0))) m.set(keyOf(v, 1), { c: col });
   }
   return m;
 }
@@ -740,6 +1158,7 @@ for (let i = 0; i < 6; i++) {
   const wl = simpleBox(g, '#ffffff', 0.45, 0.03, 0.14, -0.22, 0, 0);
   const wr = simpleBox(g, '#ffffff', 0.45, 0.03, 0.14, 0.22, 0, 0);
   simpleBox(g, '#ffffff', 0.12, 0.08, 0.3, 0, 0, 0);
+  g.traverse(o => { o.castShadow = false; });
   wl.geometry.translate(-0.0, 0, 0);
   scene.add(g);
   gulls.push({ g, wl, wr, r: 6 + Math.random() * 10, h: 7 + Math.random() * 5, s: 0.15 + Math.random() * 0.15, p: Math.random() * 6.28, f: 5 + Math.random() * 3 });
@@ -792,8 +1211,8 @@ function startAmbient() {
 // ---------- picking ----------
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
-const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-const valid = (ci, y) => ci >= 0 && y >= 0 && y < MAXY && !has(ci, y);
+const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(WATER + 0.1));
+const valid = (v, y) => v >= 0 && !vFixed[v] && y >= 0 && y < MAXY && !has(v, y);
 
 function pick(cx, cy, erase) {
   const rect = canvas.getBoundingClientRect();
@@ -805,49 +1224,60 @@ function pick(cx, cy, erase) {
   let hit = null;
   if (pickMesh) {
     const hs = ray.intersectObject(pickMesh, false);
-    if (hs.length) hit = { d: hs[0].distance, m: pickMeta[hs[0].faceIndex] };
+    if (hs.length) hit = { d: hs[0].distance, m: pickMeta[hs[0].faceIndex], pt: hs[0].point };
   }
-  if (erase) return hit ? { erase: true, ci: hit.m.ci, y: hit.m.y } : null;
+  if (erase) return hit ? { erase: true, v: hit.m.v, y: hit.m.y } : null;
   if (hit && hit.d <= pd + 1e-3) {
-    const { ci, y, t, k } = hit.m;
-    const tgt = t === 'top' ? [ci, y + 1] : t === 'bottom' ? [ci, y - 1] : [cells[ci].nb[k], y];
-    return valid(tgt[0], tgt[1]) ? { ci: tgt[0], y: tgt[1] } : null;
+    const { v, y, t, cands } = hit.m;
+    if (t === 'top') return valid(v, y + 1) ? { v, y: y + 1 } : null;
+    if (t === 'bottom') return valid(v, y - 1) ? { v, y: y - 1 } : null;
+    let best = -1, bd = Infinity;
+    for (const c of cands) {
+      const d = (VERTS[c][0] - hit.pt.x) ** 2 + (VERTS[c][1] - hit.pt.z) ** 2;
+      if (d < bd && valid(c, y)) { bd = d; best = c; }
+    }
+    return best >= 0 ? { v: best, y } : null;
   }
   if (pd < Infinity) {
-    const ci = cellAt(p.x, p.z);
-    return valid(ci, 0) ? { ci, y: 0 } : null;
+    const v = vertexAt(p.x, p.z);
+    return valid(v, 0) ? { v, y: 0 } : null;
   }
   return null;
 }
 
-// hover ghost shaped like the target cell
+// hover ghost shaped like the house footprint around the corner
 const ghostMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.4, depthWrite: false });
 const ghostLineMat = new THREE.LineBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9 });
 const ghost = new THREE.Group(); scene.add(ghost);
 let ghostKey = '';
 function setGhost(t, erase) {
-  const key = t ? t.ci + ':' + t.y + ':' + erase : '';
+  const key = t ? t.v + ':' + t.y + ':' + erase : '';
   if (key === ghostKey) return;
   ghostKey = key;
   disposeGroup(ghost); ghost.clear();
   if (!t) return;
-  const cell = cells[t.ci], inf = erase ? 0.04 : 0;
+  const prev = M;
   M = newMesh();
-  ub(cell, t.y, -inf, 1 + inf, -inf, 1 + inf, -inf, 1 + inf, [1, 1, 1]);
+  const lp = [], y0 = t.y - (erase ? 0.03 : 0), y1 = t.y + 1 + (erase ? 0.03 : 0);
+  for (const [ci, k] of vCells[t.v]) {
+    const cell = cells[ci], V = cell.q[k];
+    const a = xz(cell, UVM[k][0], UVM[k][1]), c = xz(cell, 0.5, 0.5), d = xz(cell, UVM[pv4(k)][0], UVM[pv4(k)][1]);
+    const ref = [V[0], (y0 + y1) / 2, V[1]];
+    face('main', [P3(a, y1), P3(c, y1), P3(d, y1), P3(V, y1)], [1, 1, 1], ref);
+    face('main', [P3(a, y0), P3(c, y0), P3(c, y1), P3(a, y1)], [1, 1, 1], ref);
+    face('main', [P3(c, y0), P3(d, y0), P3(d, y1), P3(c, y1)], [1, 1, 1], ref);
+    for (const yy of [y0 + 0.01, y1]) lp.push(a[0], yy, a[1], c[0], yy, c[1], c[0], yy, c[1], d[0], yy, d[1]);
+    lp.push(c[0], y0, c[1], c[0], y1, c[1]);
+  }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(M.main.p, 3));
+  M = prev;
   ghost.add(new THREE.Mesh(geo, ghostMat));
-  const lp = [];
-  for (let k = 0; k < 4; k++) {
-    const a = cell.q[k], b = cell.q[(k + 1) % 4];
-    for (const yy of [t.y + 0.01, t.y + 1]) lp.push(a[0], yy, a[1], b[0], yy, b[1]);
-    lp.push(a[0], t.y, a[1], a[0], t.y + 1, a[1]);
-  }
   const lg = new THREE.BufferGeometry();
   lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
   ghost.add(new THREE.LineSegments(lg, ghostLineMat));
   ghostMat.color.set(erase ? '#d4574a' : (colorChoice === 'mixed' ? nextMixed : colorChoice));
-  ghostMat.opacity = erase ? 0.45 : 0.35;
+  ghostMat.opacity = erase ? 0.45 : 0.32;
   ghostLineMat.color.set(erase ? '#d4574a' : '#ffffff');
 }
 
@@ -861,12 +1291,12 @@ function act(cx, cy, erase) {
   const t = pick(cx, cy, erase);
   if (!t) return;
   if (t.erase) {
-    commit(() => blocks.delete(keyOf(t.ci, t.y)));
+    commit(() => blocks.delete(keyOf(t.v, t.y)));
     pluck(t.y, true);
   } else {
     const c = colorChoice === 'mixed' ? nextMixed : colorChoice;
     nextMixed = colorForPlacement();
-    anim = { key: keyOf(t.ci, t.y), start: performance.now(), obj: null };
+    anim = { key: keyOf(t.v, t.y), start: performance.now(), obj: null };
     commit(() => blocks.set(anim.key, { c }));
     pluck(t.y);
   }
@@ -938,7 +1368,7 @@ function applyTime() {
   foamMat.color.copy(cur.foamCol);
   litMat.color.copy(cur.glass); litMat.emissiveIntensity = cur.glow;
   bloom.strength = cur.bloom;
-  gridMat.uniforms.uBase.value = 0.07 - 0.05 * Math.min(1, cur.glow / 1.7);
+  gridMat.uniforms.uBase.value = 0.07 - 0.064 * Math.min(1, cur.glow / 1.7);
 }
 
 // ---------- UI ----------
@@ -1048,7 +1478,7 @@ function tick(now) {
   foamMat.opacity = cur.foam + Math.sin(t * 1.4) * 0.12;
   for (const bt of boats) {
     const ang = bt.phase + t * bt.speed;
-    bt.b.position.set(Math.cos(ang) * bt.radius, -0.22 + Math.sin(t * 1.3 + bt.phase) * 0.05, Math.sin(ang) * bt.radius);
+    bt.b.position.set(Math.cos(ang) * bt.radius, WATER + 0.03 + Math.sin(t * 1.3 + bt.phase) * 0.05, Math.sin(ang) * bt.radius);
     bt.b.rotation.y = -ang + (bt.speed > 0 ? 0 : Math.PI);
     bt.b.rotation.x = Math.sin(t * 1.1 + bt.phase) * 0.05;
   }

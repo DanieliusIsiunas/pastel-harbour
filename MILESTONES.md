@@ -30,11 +30,35 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       contact shading at the quay, vignette.
 - [x] **M4 Feel** — pop animation, pentatonic plucks by height, ambient sea, cursor-local grid reveal,
       cell-shaped hover ghost, undo/redo, gulls and boats.
-- [ ] **M5 Corner-based tiles** — move from cell-centred blocks to Townscaper's vertex-centred
-      (dual-grid, marching-cubes) placement so building silhouettes get rounded corners.
-- [ ] **M6 Terrain extras** — stairs between levels, roof gardens, walls/fences on enclosed ground.
-- [ ] **M7 Sharing** — encode a town as a short link code; photo mode.
-- [ ] **M8 Performance** — chunked rebuilds and mobile tuning for very large towns.
+- [x] **M5 Corner-based houses** — houses now sit on grid corners (Townscaper's dual grid). Each cell
+      draws the quarter of every house around it: half-walls on the cell's midlines, rounded outer
+      corners (a per-house trait: crisp, soft or round), lone towers become round with conical spires.
+      Roofs are hip roofs built as a fan from each house corner, so neighbours share one continuous
+      ridge; inner cells of big blocks become roof terraces. Floating houses get smooth arches whose
+      crown sits on the shared joint, so two cells form one arch. Windows, doors and dormers are
+      centred on the same joints and drawn as two matching halves.
+- [x] **M6 Ground and roof life** — quays that follow the building outline with foam, door steps
+      down into the water, lamp posts on rounded quay corners, enclosed courtyards with trees or a
+      well and flowers, roof gardens and planters on terraces, chimneys, dormers, shopfronts with
+      striped awnings, balconies. Roof colours are grouped into small regions so rows read as buildings.
+- [x] **M6b Gables and stairs** — lone cottages and the last house of a row get gable ends (the wall
+      rises into a triangle under a verge, with an attic window); two-storey houses sometimes get an
+      exterior staircase from the street to a first-floor door with a landing and railing.
+- [x] **M6c Streets first** — level 0 is now a cobbled street layer laid on the water (quay walls,
+      kerbs, foam, lamp posts on rounded corners). Houses are built on streets, doors prefer to face a
+      street, and an open street tile hemmed in by houses becomes a garden with a tree or a well.
+- [x] **M6d Nothing levitates** — any floor with nothing directly under it gets arches and piers that
+      reach down to whatever is there: the floor below, the street (arcades over lanes), or the sea
+      bed (bridge piers with stone footings in the water).
+- [ ] ~~M7 Sharing~~ — skipped for now.
+- [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
+
+## Polish ideas for later
+
+- Tiers of arches when a floor spans more than one storey of empty space (currently one tall pier).
+- Steps down from the street into the water at some quay edges.
+- String courses between floors, corner pilasters, door/window variety per colour family.
+- Soft ambient occlusion where walls meet roofs.
 
 ## Running locally
 
@@ -42,5 +66,6 @@ Open `index.html` through any static server, for example:
 
     python3 -m http.server 8000
 
-then visit http://localhost:8000. (The file is written without `<!doctype>`/`<head>` because it is
+then visit http://localhost:8000. In the browser console, `harbourView(x, y, z, tx, ty, tz)`
+moves the camera, which helps when inspecting details. (The file is written without `<!doctype>`/`<head>` because it is
 also published as a claude.ai artifact; browsers render it fine.)
