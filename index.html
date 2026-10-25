@@ -132,6 +132,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 
 // ---------- palette ----------
 const PALETTE = [
@@ -525,7 +526,7 @@ function emitCellLevel(ci, y) {
     const R = [gab(mInfo(q), q, vv[nx4(q)])];
     if (curves[q]) {
       const pts = curves[q];
-      for (let i = 0; i < pts.length; i++) R.push({ p: pts[i], e: true, off: outward(pts[Math.max(0, i - 1)], pts[Math.min(pts.length - 1, i + 1)], Qc[q]) });
+      for (let i = 0; i < pts.length; i++) R.push({ p: pts[i], e: true, cv: true, off: outward(pts[Math.max(0, i - 1)], pts[Math.min(pts.length - 1, i + 1)], Qc[q]) });
     } else R.push({ p: C, e: !all4, off: cOff });
     R.push(gab(mInfo(pv4(q)), q, vv[pv4(q)]));
     return R;
@@ -543,7 +544,9 @@ function emitCellLevel(ci, y) {
     }
     if (!fa[q]) {
       emitRoof(ci, q, y, v, b, R, Vq);
-      for (let i = 0; i < R.length - 1; i++) pickTri(P3(Vq, y + 1), P3(R[i].p, y + 1), P3(R[i + 1].p, y + 1), { v, y, t: 'top' });
+      // the click target follows the roof slopes so clicking a visible roof stacks a floor
+      const HV = apexOf(v, y), hOf = r => (r.e && !r.g) ? y + 1 : y + 1 + RISE;
+      for (let i = 0; i < R.length - 1; i++) pickTri(P3(Vq, HV), P3(R[i].p, hOf(R[i])), P3(R[i + 1].p, hOf(R[i + 1])), { v, y, t: 'top' });
     }
   }
 
@@ -589,6 +592,13 @@ function emitWall(cell, y, s, v, b, supported, vv) {
     const y0 = street ? y : y - 0.06, sb = street ? 0.8 : 1;
     face('main', [P3(s.a, y0), P3(s.b, y0), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [sb, sb, 1, 1]);
     if (street) wb(F, 0, L, -0.02, 0.022, y, y + 0.1, lin(shade(b.c, 0.82)));
+    // a slim band marks each storey, a two-step cornice sits under every eave
+    if (!street && y >= 2) wb(F, 0, L, -0.02, 0.016, y - 0.005, y + 0.035, lin(shade(b.c, 0.88)));
+    if (!has(v, y + 1)) {
+      const corn = lin('#' + new THREE.Color(b.c).lerp(new THREE.Color('#ffffff'), 0.55).getHexString());
+      wb(F, 0, L, -0.02, 0.016, y + 0.85, y + 0.9, corn);
+      wb(F, 0, L, -0.02, 0.034, y + 0.9, y + 0.955, corn);
+    }
     if (!s.curve) emitFacade(y, s, F, v, b, vv, cell);
     return;
   }
@@ -614,16 +624,26 @@ function emitWall(cell, y, s, v, b, supported, vv) {
   // smooth arch: the crown sits at the joint, so two neighbouring halves make one arch
   const P = (sx, d, yy) => [F.a[0] + F.t[0] * sx + F.n[0] * d, yy, F.a[1] + F.t[1] * sx + F.n[1] * d];
   const open = x => x < 0.8 ? 0.58 * Math.sqrt(Math.max(0, 1 - (x / 0.8) ** 2)) : 0;
-  const n = 14, inner = lin(shade(b.c, 0.7)), depth = 0.12, top = y + ARCH;
+  const inner = lin(shade(b.c, 0.7)), depth = 0.12;
   const inRef = [s.a[0] - s.n[0], y + 0.3, s.a[1] - s.n[1]];
-  for (let i = 0; i < n; i++) {
-    const x0 = i / n, x1 = (i + 1) / n, s0 = x0 * L, s1 = x1 * L;
-    const y0 = y + open(x0), y1 = y + open(x1);
-    face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, 0, top), P(s0, 0, top)], col, inRef);
-    face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, -depth, y1), P(s0, -depth, y0)], inner, [(F.a[0] + F.t[0] * s0), y + 3, (F.a[1] + F.t[1] * s0)]);
-    face('main', [P(s0, -depth, y0), P(s1, -depth, y1), P(s1, -depth, top), P(s0, -depth, top)], inner, [s.a[0] + s.n[0], y + 0.3, s.a[1] + s.n[1]]);
+  const arch = Y => {
+    const n = 14, top = Y + ARCH;
+    for (let i = 0; i < n; i++) {
+      const x0 = i / n, x1 = (i + 1) / n, s0 = x0 * L, s1 = x1 * L;
+      const y0 = Y + open(x0), y1 = Y + open(x1);
+      face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, 0, top), P(s0, 0, top)], col, [inRef[0], Y + 0.3, inRef[2]]);
+      face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, -depth, y1), P(s0, -depth, y0)], inner, [(F.a[0] + F.t[0] * s0), Y + 3, (F.a[1] + F.t[1] * s0)]);
+      face('main', [P(s0, -depth, y0), P(s1, -depth, y1), P(s1, -depth, top), P(s0, -depth, top)], inner, [s.a[0] + s.n[0], Y + 0.3, s.a[1] + s.n[1]]);
+    }
+    wb(F, 0, L, 0, 0.02, Y + ARCH - 0.04, Y + ARCH, lin(C.trim));
+  };
+  arch(y);
+  // a taller gap gets an arch at every storey, tied by a beam, like an aqueduct
+  for (let k = Math.max(1, Math.ceil(base - 0.01)); k < y; k++) {
+    arch(k);
+    wb(F, 0, L, -depth, 0, k + ARCH, k + ARCH + 0.08, col);
+    wb(F, 0, L, -depth - 0.005, 0.012, k + ARCH + 0.08, k + ARCH + 0.1, lin(C.trim));
   }
-  wb(F, 0, L, 0, 0.02, y + ARCH - 0.04, y + ARCH, lin(C.trim));
 }
 
 // window, door and shop details. s = 0 is the joint at the edge midpoint, shared with the
@@ -679,10 +699,24 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     face('main', [P(0, -0.1, base + 0.3), P(0.13, -0.1, base + 0.3), P(0, -0.1, base + 0.42)], lin(b.c, toneOf(v, y)), ref);
   }
   const sill = (s0, s1) => wb(F, s0, s1, 0, 0.08, y + 0.3, y + 0.35, trim);
+  // each house column keeps one window-head style: plain lintel, pediment or round arch
+  const headStyle = hash(v, 0, 27, 1);
+  const head = (s1, top) => {
+    if (headStyle < 0.4 || y === 1) wb(F, 0, s1 + 0.03, 0, 0.04, top, top + 0.035, trim);
+    else if (headStyle < 0.7) wseg(F, 0, top + 0.1, s1 + 0.04, top + 0.02, 0, 0.042, 0.032, trim);
+    else {
+      const r = s1, N = 5;
+      for (let i = 0; i < N; i++) {
+        const a0 = (i / N) * Math.PI / 2, a1 = ((i + 1) / N) * Math.PI / 2;
+        wseg(F, Math.sin(a0) * r, top + Math.cos(a0) * r * 0.7, Math.sin(a1) * r, top + Math.cos(a1) * r * 0.7, 0, 0.034, 0.03, trim);
+      }
+    }
+  };
   const jointWindow = (half, y0 = 0.33, y1 = 0.8) => {
     wb(F, 0, half + 0.04, 0, 0.025, y + y0, y + y1, trim);
     wb(F, 0, half, 0, 0.034, y + y0 + 0.04, y + y1 - 0.04, gcol, lit);
     wb(F, 0, 0.012, 0, 0.042, y + y0 + 0.04, y + y1 - 0.04, trim);
+    if (y1 - y0 > 0.3) head(half + 0.04, y + y1);
   };
   if (onStreet(v, y) && h < 0.28 && L > 0.3) {
     // shopfront with a striped awning
@@ -698,7 +732,7 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     jointWindow(0.11);
     sill(0, 0.17);
     if (h2 < 0.45 && L > 0.3) {
-      const sh = lin(shade(b.c, 0.7));
+      const sh = lin(SHUTTERS[Math.floor(hash(v, 0, 28, 1) * SHUTTERS.length)]);
       wb(F, 0.155, 0.255, 0, 0.04, y + 0.36, y + 0.77, sh);
     } else if (h2 > 0.7) {
       wb(F, 0, 0.16, 0, 0.1, y + 0.35, y + 0.42, lin(C.leaf));
@@ -758,6 +792,24 @@ function emitStairs(F, role, Y0) {
   wseg(F, 0, top0 + 0.27, run, top1 + 0.27, D - 0.024, D, 0.025, rail);
 }
 
+const lerp3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+function upNormal(a, b, c) {
+  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  let n = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  if (n[1] < 0) n = n.map(x => -x);
+  const l = Math.hypot(...n) || 1;
+  return n.map(x => x / l);
+}
+const lift = (p, n, k = 0.006) => [p[0] + n[0] * k, p[1] + n[1] * k, p[2] + n[2] * k];
+// a raised cap tile along a roof line
+function capLine(p0, p1, col) {
+  const dx = p1[0] - p0[0], dz = p1[2] - p0[2], L = Math.hypot(dx, dz);
+  if (L < 0.05) return;
+  const sx = -dz / L * 0.026, sz = dx / L * 0.026, h0 = 0.004, h1 = 0.042;
+  hexa('main', [[p0[0] - sx, p0[1] + h0, p0[2] - sz], [p0[0] + sx, p0[1] + h0, p0[2] + sz], [p1[0] + sx, p1[1] + h0, p1[2] + sz], [p1[0] - sx, p1[1] + h0, p1[2] - sz],
+                [p0[0] - sx, p0[1] + h1, p0[2] - sz], [p0[0] + sx, p0[1] + h1, p0[2] + sz], [p1[0] + sx, p1[1] + h1, p1[2] + sz], [p1[0] - sx, p1[1] + h1, p1[2] - sz]], col);
+}
+
 function emitRoof(ci, q, y, v, b, R, Vq) {
   const roofHex = roofOf(v, y);
   const Hr = y + 1 + RISE, E = y + 1 - DROP, HV = apexOf(v, y);
@@ -782,9 +834,22 @@ function emitRoof(ci, q, y, v, b, R, Vq) {
     return;
   }
   const fasc = lin(shade(roofHex, 0.72)), soff = lin(shade(b.c, 0.6));
+  const course = lin(roofHex, 0.8), capCol = lin(shade(roofHex, 0.74));
+  const cone = R.some(r => r.cv);
   for (let i = 0; i < R.length - 1; i++) {
     const a = pt(R[i]), c = pt(R[i + 1]);
     face('main', [apex, a, c], roof, below, [1.07, 0.93, 0.93]);
+    // tile courses run parallel to the eave edge of each facet
+    const eA = R[i].e && !R[i].g, eC = R[i + 1].e && !R[i + 1].g;
+    if (eA || eC) {
+      const n = upNormal(apex, a, c);
+      const line = eA && eC ? t => [lerp3(a, apex, t), lerp3(c, apex, t)]
+        : eA ? t => [lerp3(a, apex, t), lerp3(a, c, t)] : t => [lerp3(c, apex, t), lerp3(c, a, t)];
+      for (const t of [0.16, 0.33, 0.5, 0.67, 0.84]) {
+        const [p0, q0] = line(t), [p1, q1] = line(t + 0.045);
+        face('main', [lift(p0, n), lift(q0, n), lift(q1, n), lift(p1, n)], course, below);
+      }
+    }
     if (R[i].e && R[i + 1].e) {
       const ao = [a[0], a[1] - RT, a[2]], co = [c[0], c[1] - RT, c[2]];
       const wallY = r => r.g ? Hr - RT - 0.02 : y + 1;
@@ -792,6 +857,21 @@ function emitRoof(ci, q, y, v, b, R, Vq) {
       face('main', [ao, co, P3(R[i + 1].p, wallY(R[i + 1])), P3(R[i].p, wallY(R[i]))], soff, [(a[0] + c[0]) / 2, y + 6, (a[2] + c[2]) / 2]);
     }
   }
+  // caps only where two slopes really meet: ridges between houses, hips where the wall turns
+  // at an edge midpoint, and the hip over a crisp outer corner
+  const cell = cells[ci];
+  const turns = k => {
+    const nb = cells[cell.nb[k]];
+    if (!nb) return true;
+    const m = xz(cell, UVM[k][0], UVM[k][1]), c0 = xz(cell, 0.5, 0.5);
+    const d1 = norm2(sub2(c0, m)), d2 = norm2(sub2(nb.c, m));
+    return d1[0] * d2[0] + d1[1] * d2[1] > -0.9;
+  };
+  for (const [r, k] of [[R[0], q], [R[R.length - 1], pv4(q)]]) {
+    if (!r.e || r.g) capLine(apex, pt(r), capCol);
+    else if (turns(k) && !cone) capLine(apex, pt(r), capCol);
+  }
+  if (cone && roundOf(v, y) < 0.15) capLine(apex, pt(R[Math.floor(R.length / 2)]), capCol);
   const primary = vCells[v][0][0] === ci;
   if (!primary) return;
   if (HV > Hr + 0.3) {
@@ -801,10 +881,14 @@ function emitRoof(ci, q, y, v, b, R, Vq) {
     const p = l2(Vq, R[0].p, 0.42);
     boxAt(p[0], p[1], 0.065, y + 1.05, Hr + 0.22, lin(C.stone));
     boxAt(p[0], p[1], 0.085, Hr + 0.22, Hr + 0.27, lin(shade(C.stone, 0.82)));
+    const pot = lin('#b8694c');
+    boxAt(p[0] - 0.03, p[1], 0.022, Hr + 0.27, Hr + 0.36, pot);
+    if (hash(v, y, 6, 7) < 0.5) boxAt(p[0] + 0.035, p[1] + 0.01, 0.02, Hr + 0.27, Hr + 0.33, pot);
   }
 }
 
 // ---------- the street layer ----------
+const SHUTTERS = ['#5f7f6a', '#4f6d8a', '#8a5a4a', '#6b5b7a', '#3f6b66', '#7a8f9e'];
 const PAVERS = ['#ddd5c7', '#d2c9b9', '#e4dccd', '#cbc2b1', '#d8cfbf'];
 function emitGroundCell(ci) {
   const cell = cells[ci], vv = cell.v;
@@ -841,7 +925,7 @@ function emitGroundCell(ci) {
         const t = i / N, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
         pts.push([a * A[0] + b * C[0] + c * B[0], a * A[1] + b * C[1] + c * B[1]]);
       }
-      for (let i = 0; i <= N; i++) R.push({ p: pts[i], e: true, off: outward(pts[Math.max(0, i - 1)], pts[Math.min(N, i + 1)], Qc[q]) });
+      for (let i = 0; i <= N; i++) R.push({ p: pts[i], e: true, cv: true, off: outward(pts[Math.max(0, i - 1)], pts[Math.min(N, i + 1)], Qc[q]) });
     } else R.push({ p: C, e: !all4, off: cOff });
     R.push(mInfo(pv4(q)));
     const pt = (r, o = EDGE) => r.e ? [r.p[0] + r.off[0] * o, r.p[1] + r.off[1] * o] : r.p;
@@ -858,6 +942,7 @@ function emitGroundCell(ci) {
         const fa = pt(R[i], EDGE + 0.32), fc = pt(R[i + 1], EDGE + 0.32);
         face('foam', [P3(a, WATER + 0.12), P3(c, WATER + 0.12), P3(fc, WATER + 0.12), P3(fa, WATER + 0.12)], lin(C.foam), P3(Vq, -2));
         pickQuad(P3(a, WATER), P3(c, WATER), P3(c, GROUND), P3(a, GROUND), { v, y: 0, t: 'side', cands: [vv[nx4(q)], vv[pv4(q)]] });
+        if (i === 0 && !R[1].cv && !has(v, 1) && hash(v, ci, q, 8) < 0.3) waterStairs(a, c, Vq);
       }
     }
     if (has(v, 1) || isCourtyard(v)) continue;
@@ -884,6 +969,23 @@ function emitGroundCell(ci) {
       boxAt(p[0], p[1], 0.042, GROUND + 0.58, GROUND + 0.6, iron);
     }
   }
+}
+// stone steps running down the face of the quay into the harbour, with a mooring bollard
+function waterStairs(a, c, inside) {
+  const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+  if (L < 0.3) return;
+  const F = { a, t: norm2(sub2(c, a)), n: outward(a, c, inside), L };
+  const n = 5, run = Math.min(L * 0.85, 0.5), drop = GROUND - WATER + 0.02;
+  for (let j = 0; j < n; j++) {
+    const top = GROUND - ((j + 1) / n) * drop;
+    wb(F, (j / n) * run, ((j + 1) / n) * run + 0.002, 0, 0.17, WATER - 0.3, top, lin(j & 1 ? C.stone : shade(C.stone, 0.94)));
+    wb(F, (j / n) * run, ((j + 1) / n) * run, 0, 0.175, top - 0.015, top, lin(C.stoneLip));
+  }
+  wb(F, run, run + 0.04, 0, 0.17, WATER - 0.3, GROUND + 0.02, lin(C.stoneLip));
+  const iron = lin('#3b4148');
+  const bx = F.a[0] + F.t[0] * (run + 0.12) - F.n[0] * 0.08, bz = F.a[1] + F.t[1] * (run + 0.12) - F.n[1] * 0.08;
+  boxAt(bx, bz, 0.03, GROUND, GROUND + 0.1, iron);
+  boxAt(bx, bz, 0.04, GROUND + 0.1, GROUND + 0.125, iron);
 }
 // a street tile hemmed in by houses on every side becomes a little garden
 function isCourtyard(v) {
@@ -930,7 +1032,7 @@ controls.maxPolarAngle = 1.42;
 controls.minDistance = 5;
 controls.maxDistance = 85;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-window.harbourView = (x, y, z, tx = 0, ty = 1, tz = 0) => { camera.position.set(x, y, z); controls.target.set(tx, ty, tz); };
+window.harbourView = (x, y, z, tx = 0, ty = 1, tz = 0) => { camera.position.set(x, y, z); controls.target.set(tx, ty, tz); controls.update(); camera.updateMatrixWorld(); };
 
 const hemi = new THREE.HemisphereLight('#fdf6ec', '#7fb2bf', 1.5);
 scene.add(hemi);
@@ -1040,6 +1142,7 @@ function rebuild() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pickP, 3));
     pickMesh = new THREE.Mesh(g, pickMat);
+    pickMesh.visible = false;   // raycasts still hit it; the renderer and the AO pass skip it
     scene.add(pickMesh);
   }
   document.getElementById('count').textContent = blocks.size + (blocks.size === 1 ? ' block' : ' blocks');
@@ -1434,6 +1537,17 @@ soundBtn.onclick = () => {
 const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
 const composer = new EffectComposer(renderer, rt);
 composer.addPass(new RenderPass(scene, camera));
+// soft contact shadows in the creases: roof against wall, wall against street, under eaves and arches
+const lowPower = matchMedia('(pointer: coarse)').matches;
+let gtao = null;
+if (!lowPower) {
+  gtao = new GTAOPass(scene, camera, 1, 1);
+  gtao.blendIntensity = 0.9;
+  gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.3, thickness: 1.2, scale: 1.25, samples: 16 });
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 16 });
+  composer.addPass(gtao);
+}
+window.harbourAO = on => { if (gtao) gtao.enabled = on; };
 const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0, 0.45, 0.88);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());

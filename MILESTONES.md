@@ -50,13 +50,22 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
 - [x] **M6d Nothing levitates** — any floor with nothing directly under it gets arches and piers that
       reach down to whatever is there: the floor below, the street (arcades over lanes), or the sea
       bed (bridge piers with stone footings in the water).
+- [x] **M9 Roof craft** — tile courses on every slope (parallel to the eave), ridge and hip caps on
+      the lines where facets meet, chimney pots. Goal: roofs read as built from tiles, not flat planes.
+- [x] **M10 Facade articulation** — cornice moulding under every eave, a floor band between storeys,
+      window heads and the odd pediment, shutters in their own colour family. Goal: storeys and
+      buildings read at a glance, walls stop looking like flat coloured slabs.
+- [x] **M11 Tiered arcades and water stairs** — when a floor spans more than one storey of empty space
+      the piers carry an arch at every storey (aqueduct); open quays get stone steps down into the water.
+- [x] **M12 Soft ambient occlusion** — screen-space GTAO so creases (roof meets wall, wall meets street,
+      under eaves and arches) darken softly, the way Townscaper's renders do.
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
 ## Polish ideas for later
 
-- Tiers of arches when a floor spans more than one storey of empty space (currently one tall pier).
-- Steps down from the street into the water at some quay edges.
+- Dormer and chimney variety, roof windows; corner quoins on crisp corners.
+- Interior light spill on streets at night; window boxes that vary by colour family.
 - String courses between floors, corner pilasters, door/window variety per colour family.
 - Soft ambient occlusion where walls meet roofs.
 
@@ -67,5 +76,5 @@ Open `index.html` through any static server, for example:
     python3 -m http.server 8000
 
 then visit http://localhost:8000. In the browser console, `harbourView(x, y, z, tx, ty, tz)`
-moves the camera, which helps when inspecting details. (The file is written without `<!doctype>`/`<head>` because it is
+moves the camera, and `harbourAO(false)` turns ambient occlusion off for comparison. (The file is written without `<!doctype>`/`<head>` because it is
 also published as a claude.ai artifact; browsers render it fine.)
