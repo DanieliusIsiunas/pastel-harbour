@@ -135,6 +135,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 
 // ---------- palette ----------
 const PALETTE = [
@@ -297,7 +298,9 @@ function W(cell, u, v, y) {
 let M = null, MB = null, MA = null;
 // surface kind for the painted-material shader: 0 plain, 1 brick wall, 2 roof tiles, 3 cut stone
 let KIND = 0;
-const newMesh = () => ({ main: { p: [], c: [], k: [] }, lit: { p: [], c: [], k: [] }, dark: { p: [], c: [], k: [] }, foam: { p: [], c: [], k: [] } });
+const bucket = () => ({ p: [], c: [], k: [], inst: [] });
+// main town surfaces, glass, foam, window cut masks, the rooms behind windows, and instanced bricks
+const newMesh = () => ({ main: bucket(), lit: bucket(), dark: bucket(), foam: bucket(), mask: bucket(), roomLit: bucket(), roomDark: bucket(), bricks: bucket() });
 const setTarget = () => {};
 
 function face(bk, pts, col, ref, sh) {
@@ -337,6 +340,37 @@ function boxAt(x, z, hw, y0, y1, col, bk = 'main') {
 }
 function shade(hex, k) { return '#' + new THREE.Color(hex).multiplyScalar(k).getHexString(); }
 
+// ---------- N1: real bricks ----------
+// A chamfered unit brick, instanced thousands of times. Each brick is placed on a wall frame with its
+// own size jitter, how far it stands proud of the wall, and its own tint, so every edge catches light.
+const BRICK_STRIDE = 13;   // centre xyz, along-wall xz, outward xz, width, height, depth, rgb
+function brickRows(F, y0, y1, col, open, clip, size = [0.23, 0.1], proud = [0.003, 0.006], spread = 0.18) {
+  const [bw, bh] = size, L = F.L;
+  const B = M.bricks.inst;
+  for (let r = 0; y0 + r * bh + bh * 0.5 < y1; r++) {
+    const yb = y0 + r * bh, yt = Math.min(y1, yb + bh);
+    if (yt - yb < bh * 0.45) continue;
+    const off = (r & 1) ? bw * 0.5 : 0;
+    for (let sx = -off; sx < L; sx += bw) {
+      const s0 = Math.max(0, sx) + 0.004, s1 = Math.min(L, sx + bw) - 0.004;
+      if (s1 - s0 < 0.035) continue;
+      const sm = (s0 + s1) / 2, ym = (yb + yt) / 2;
+      if (open && open.some(o => sm > o[0] && sm < o[1] && ym > o[2] && ym < o[3])) continue;
+      if (clip && !clip(sm, ym)) continue;
+      const x = F.a[0] + F.t[0] * sm, z = F.a[1] + F.t[1] * sm;
+      const h1 = hash(Math.round(x * 97), Math.round(z * 97), Math.round(ym * 50), 77), h2 = hash(Math.round(x * 89), Math.round(ym * 61), 3, 78);
+      const pr = proud[0] + proud[1] * h1, depth = pr + 0.012;
+      const d = pr - depth / 2;
+      const k = 1 - spread * 0.5 + spread * h2;
+      B.push(x + F.n[0] * d, ym, z + F.n[1] * d, F.t[0], F.t[1], F.n[0], F.n[1],
+        (s1 - s0) * (0.97 + 0.03 * h1), (yt - yb) * 0.88, depth,
+        col[0] * k * (1 + (h1 - 0.5) * 0.08), col[1] * k, col[2] * k * (1 + (h2 - 0.5) * 0.08));
+    }
+  }
+}
+// openings on the wall currently being decorated, so bricks leave windows and doors clear
+let OPEN = [];
+
 // 2D helpers on the xz plane
 const l2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 const sub2 = (a, b) => [a[0] - b[0], a[1] - b[1]];
@@ -358,6 +392,25 @@ function wb(F, s0, s1, d0, d1, y0, y1, col, bk = 'main') {
 function wseg(F, s0, ya, s1, yb, d0, d1, th, col) {
   const P = (s, d, yy) => [F.a[0] + F.t[0] * s + F.n[0] * d, yy, F.a[1] + F.t[1] * s + F.n[1] * d];
   hexa('main', [P(s0, d0, ya), P(s1, d0, yb), P(s1, d1, yb), P(s0, d1, ya), P(s0, d0, ya + th), P(s1, d0, yb + th), P(s1, d1, yb + th), P(s0, d1, ya + th)], col);
+}
+// ---------- N2: windows cut through the wall ----------
+// A mask quad marks the opening in the stencil buffer; a small inside-out room drawn only where the
+// mask is visible makes the wall look cut, with depth behind the glass line.
+function hole(F, s0, s1, y0, y1, lit) {
+  OPEN.push([s0 - 0.03, s1 + 0.03, y0 - 0.05, y1 + 0.05]);
+  const P = (s, d, yy) => [F.a[0] + F.t[0] * s + F.n[0] * d, yy, F.a[1] + F.t[1] * s + F.n[1] * d];
+  const D = 0.003, back = -0.16;
+  face('mask', [P(s0, D, y0), P(s1, D, y0), P(s1, D, y1), P(s0, D, y1)], [1, 1, 1], P((s0 + s1) / 2, -1, (y0 + y1) / 2));
+  hexa(lit === 'lit' ? 'roomLit' : 'roomDark',
+    [P(s0, back, y0), P(s1, back, y0), P(s1, 0, y0), P(s0, 0, y0), P(s0, back, y1), P(s1, back, y1), P(s1, 0, y1), P(s0, 0, y1)],
+    [1, 1, 1], [0.42, 0.42, 0.9, 0.9, 0.55, 0.55, 1, 1]);
+}
+// a frame of four bars around an opening; joint windows skip the bar on the shared joint
+function frameRing(F, s0, s1, y0, y1, t, col, skipLeft = false) {
+  wb(F, s0 - (skipLeft ? 0 : t), s1 + t, 0, 0.025, y0 - t, y0, col);
+  wb(F, s0 - (skipLeft ? 0 : t), s1 + t, 0, 0.025, y1, y1 + t, col);
+  wb(F, s1, s1 + t, 0, 0.025, y0, y1, col);
+  if (!skipLeft) wb(F, s0 - t, s0, 0, 0.025, y0, y1, col);
 }
 function wslab(F, s0, s1, d0, ya, d1, yb, th, col) {
   const P = (s, d, yy) => [F.a[0] + F.t[0] * s + F.n[0] * d, yy, F.a[1] + F.t[1] * s + F.n[1] * d];
@@ -474,7 +527,7 @@ function computeHouses() {
       windows: r(4) < 0.45 ? 'joint' : r(4) < 0.8 ? 'pair' : 'mix',
       head: r(5), shutters: r(6) < 0.45, flowers: r(7) > 0.6, balcony: 0.08 + r(8) * 0.22,
       shop: r(9) < 0.4, shutterCol: SHUTTERS[Math.floor(r(10) * SHUTTERS.length)],
-      awning: PALETTE[Math.floor(r(11) * PALETTE.length)].roof,
+      awning: PALETTE[Math.floor(r(11) * PALETTE.length)].roof, quoins: r(13) < 0.55,
     };
     houseIdOf.set(v0, h.id);
     const q = [v0];
@@ -530,7 +583,7 @@ function emitCellLevel(ci, y) {
   const segs = [];
   for (let k = 0; k < 4; k++) if (wallAt(k)) {
     const own = f[k] ? k : nx4(k), a = Mp[k], b = trimP(k);
-    segs.push({ a, b, own, k, curve: false, n: outward(a, b, Qc[own]) });
+    segs.push({ a, b, own, k, curve: false, c0: C, n: outward(a, b, Qc[own]) });
   }
   const curves = {};
   for (let q = 0; q < 4; q++) if (convex(q)) {
@@ -572,8 +625,8 @@ function emitCellLevel(ci, y) {
     setTarget(key);
     const R = ringOf(q), Vq = Vp[q];
     if (!sup[q]) {
-      const ceil = lin(shade(b.c, 0.55));
-      for (let i = 0; i < R.length - 1; i++) face('main', [P3(Vq, y + ARCH), P3(R[i].p, y + ARCH), P3(R[i + 1].p, y + ARCH)], ceil, P3(Vq, y + 5));
+      const stilt = isStilted(v, y), ceil = lin(stilt ? IRON2 : shade(b.c, 0.55)), cy = stilt ? y - 0.1 : y + ARCH;
+      for (let i = 0; i < R.length - 1; i++) face('main', [P3(Vq, cy), P3(R[i].p, cy), P3(R[i + 1].p, cy)], ceil, P3(Vq, y + 5));
       for (let i = 0; i < R.length - 1; i++) pickTri(P3(Vq, y), P3(R[i].p, y), P3(R[i + 1].p, y), { v, y, t: 'bottom' });
     }
     if (!fa[q]) {
@@ -591,6 +644,20 @@ function emitCellLevel(ci, y) {
     const cands = s.curve ? [vv[nx4(s.own)], vv[pv4(s.own)]] : [f[s.k] ? vv[nx4(s.k)] : vv[s.k]];
     pickQuad(P3(s.a, y), P3(s.b, y), P3(s.b, y + 1), P3(s.a, y + 1), { v, y, t: 'side', cands });
   }
+  // a drainpipe marks the seam where two different houses meet along one straight facade
+  const meet = segs.filter(sg => !sg.curve && sg.b === C);
+  if (meet.length === 2 && meet.every(sg => sup[sg.own])) {
+    const [s1, s2] = meet, va = vv[s1.own], vb = vv[s2.own];
+    if (houseOf(va) !== houseOf(vb) && blocks.get(keyOf(va, y)).c !== blocks.get(keyOf(vb, y)).c) {
+      setTarget(keyOf(va, y));
+      const p = [C[0] + cOff[0] * 0.035, C[1] + cOff[1] * 0.035], pipe = lin('#4b5259');
+      const y0 = onStreet(va, y) ? y : y - 0.02, topLevel = !has(va, y + 1) && !has(vb, y + 1);
+      boxAt(p[0], p[1], 0.018, y0, y + (topLevel ? 0.86 : 1), pipe);
+      for (const yy of [y + 0.3, y + 0.75]) boxAt(p[0], p[1], 0.026, yy, yy + 0.03, pipe);
+      if (topLevel) boxAt(p[0], p[1], 0.04, y + 0.84, y + 0.93, pipe);
+      if (y0 === y && onStreet(va, y)) boxAt(p[0] + cOff[0] * 0.03, p[1] + cOff[1] * 0.03, 0.03, y, y + 0.04, pipe);
+    }
+  }
   // a supported room next to an arcade shows its wall down into the arch
   for (let k = 0; k < 4; k++) {
     if (!f[k] || !f[nx4(k)] || sup[k] === sup[nx4(k)]) continue;
@@ -600,6 +667,38 @@ function emitCellLevel(ci, y) {
     const mid = l2(Mp[k], C, 0.5);
     KIND = 1; face('main', [P3(Mp[k], y - 0.06), P3(C, y - 0.06), P3(C, y + ARCH), P3(Mp[k], y + ARCH)], col, [mid[0] - n[0], y + 0.3, mid[1] - n[1]]); KIND = 0;
   }
+}
+
+// ---------- N4: stilts, quoins, drainpipes ----------
+// A floor that overhangs open water by a storey or more stands on an iron frame instead of arches
+// (about half the houses prefer it), the way Townscaper props up hanging corners with steel legs.
+const IRON2 = '#33373d';
+const isStilted = (v, y) => y >= 2 && supportBase(v, y) < GROUND && hash((houseOf(v) || { anchor: v }).anchor, 0, 45, 1) < 0.5;
+function emitStilts(F, s, y, base, v) {
+  const L = F.L, iron = lin(IRON2);
+  wb(F, 0, L, -0.08, 0.025, y - 0.1, y, iron);                         // edge beam under the floor
+  if (s.curve) return;
+  const leg0 = Math.max(0, L - 0.07);
+  wb(F, leg0, L, -0.07, 0, base, y - 0.1, iron);                       // a leg at the corner
+  wb(F, leg0 - 0.02, L + 0.02, -0.09, 0.02, WATER - 0.05, WATER + 0.06, lin(C.stone));
+  const mid = (base + y) / 2;
+  wb(F, 0, leg0, -0.05, -0.02, mid - 0.02, mid + 0.02, iron);          // a horizontal tie
+  wseg(F, leg0, base + 0.25, 0.02, mid - 0.02, -0.05, -0.025, 0.025, iron);   // and bracing
+  wseg(F, leg0, mid + 0.02, 0.02, y - 0.12, -0.05, -0.025, 0.025, iron);
+  if (hash(Math.round(F.a[0] * 50), Math.round(F.a[1] * 50), y, 46) < 0.3) {
+    // a ladder down the leg to the water
+    for (let r = base + 0.1; r < y - 0.15; r += 0.09) wb(F, leg0 - 0.09, leg0, 0.0, 0.012, r, r + 0.012, iron);
+    wb(F, leg0 - 0.095, leg0 - 0.085, -0.005, 0.015, base, y - 0.1, iron);
+  }
+}
+// cut stone blocks that interlock up a crisp outside corner, alternating long and short
+function emitQuoins(F, y, y0, y1, phase) {
+  const L = F.L, stone = lin(shade(C.stoneLip, 1.02));
+  for (let r = 0, yy = y0; yy < y1 - 0.05; r++, yy += 0.17) {
+    const long = ((r + phase) & 1) === 0, w = long ? 0.16 : 0.09;
+    wb(F, Math.max(0, L - w), L, -0.01, 0.022, yy + 0.008, Math.min(y1, yy + 0.162), stone);
+  }
+  OPEN.push([L - 0.17, L + 1, y - 1, y + 2]);
 }
 
 function emitWall(cell, y, s, v, b, supported, vv) {
@@ -616,15 +715,18 @@ function emitWall(cell, y, s, v, b, supported, vv) {
       KIND = 1; face('main', [P3(s.a, y + 1), P3(s.b, y + 1), P3(s.a, Hr - 0.01)], col, ref(mid)); KIND = 0;
       if (L > 0.22) {
         const lo = Math.min(v, other), hi = Math.max(v, other), lit = hash(lo, hi, y, 24) < 0.5 ? 'lit' : 'dark';
-        wb(F, 0, 0.075, 0, 0.025, y + 1.06, y + 1.3, lin(C.trim));
-        wb(F, 0, 0.045, 0, 0.034, y + 1.09, y + 1.27, lit === 'lit' ? [1, 1, 1] : lin(C.glass), lit);
+        frameRing(F, 0, 0.045, y + 1.09, y + 1.27, 0.03, lin(C.trim), true);
+        hole(F, 0, 0.045, y + 1.09, y + 1.27, lit);
+        wb(F, 0, 0.011, 0, 0.034, y + 1.09, y + 1.27, lin(C.trim));
       }
     }
   }
-  if (supported) {
+  const stilt = !supported && isStilted(v, y);
+  if (supported || stilt) {
     const street = onStreet(v, y);
     const y0 = street ? y : y - 0.06, sb = street ? 0.8 : 1;
-    KIND = 1; face('main', [P3(s.a, y0), P3(s.b, y0), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [sb, sb, 1, 1]); KIND = 0;
+    // phones keep the shader-painted bricks; desktops get instanced ones over a mortar-coloured wall
+    KIND = lowPower ? 1 : 4; face('main', [P3(s.a, y0), P3(s.b, y0), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [sb, sb, 1, 1]); KIND = 0;
     if (street) wb(F, 0, L, -0.02, 0.022, y, y + 0.1, lin(shade(b.c, 0.82)));
     // a slim band marks each storey, a two-step cornice sits under every eave
     if (!street && y >= 2) wb(F, 0, L, -0.02, 0.016, y - 0.005, y + 0.035, lin(shade(b.c, 0.88)));
@@ -633,7 +735,13 @@ function emitWall(cell, y, s, v, b, supported, vv) {
       wb(F, 0, L, -0.02, 0.016, y + 0.85, y + 0.9, corn);
       wb(F, 0, L, -0.02, 0.034, y + 0.9, y + 0.955, corn);
     }
+    OPEN = [];
+    const top = has(v, y + 1) ? y + 1 : y + 0.85, from = street ? y + 0.1 : y + 0.035;
+    const crisp = !s.curve && s.b !== s.c0 && roundOf(v, y) < 0.1 && (houseOf(v) || {}).quoins;
+    if (crisp) emitQuoins(F, y, from, top, (s.k === s.own ? 0 : 1) + y);
     if (!s.curve) emitFacade(y, s, F, v, b, vv, cell);
+    if (!lowPower) brickRows(F, from, top, col, OPEN);
+    if (stilt) emitStilts(F, s, y, supportBase(v, y), v);
     return;
   }
   // nothing directly below: the corners become piers that reach down to whatever is there
@@ -700,6 +808,7 @@ function emitFacade(y, s, F, v, b, vv, cell) {
       const s1 = L - 0.03, s0 = s1 - 0.19;
       wb(F, s0 - 0.03, s1 + 0.02, 0, 0.025, y, y + 0.72, trim);
       wb(F, s0, s1, 0, 0.04, y, y + 0.64, lin(C.wood));
+      OPEN.push([s0 - 0.06, s1 + 0.05, y - 0.1, y + 0.9]);
       wb(F, s0 + 0.02, s0 + 0.05, 0.04, 0.05, y + 0.3, y + 0.36, lin(C.gold));
       wslab(F, s0 - 0.05, s1 + 0.04, 0, y + 0.82, 0.2, y + 0.73, 0.03, lin(roofHex));
       wb(F, s0 - 0.1, s0 - 0.06, 0, 0.07, y + 0.5, y + 0.6, lin(C.lamp), 'lit');
@@ -710,6 +819,7 @@ function emitFacade(y, s, F, v, b, vv, cell) {
   if (onStreet(v, y) && doorOf(v) === other) {
     wb(F, 0, 0.21, 0, 0.025, y, y + 0.74, trim);
     wb(F, 0, 0.16, 0, 0.04, y, y + 0.66, lin(C.wood));
+    OPEN.push([-0.01, 0.25, y - 0.1, y + 0.9]);
     wb(F, 0.02, 0.06, 0.04, 0.05, y + 0.3, y + 0.36, lin(C.gold));
     wslab(F, 0, 0.28, 0, y + 0.84, 0.24, y + 0.74, 0.035, lin(roofHex));
     wb(F, 0, 0.25, 0, 0.17, y, y + 0.05, lin(C.stoneLip));
@@ -749,8 +859,8 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     }
   };
   const jointWindow = (half, y0 = 0.4, y1 = 0.74) => {
-    wb(F, 0, half + 0.035, 0, 0.025, y + y0, y + y1, trim);
-    wb(F, 0, half, 0, 0.034, y + y0 + 0.035, y + y1 - 0.035, gcol, lit);
+    frameRing(F, 0, half, y + y0 + 0.035, y + y1 - 0.035, 0.035, trim, true);
+    hole(F, 0, half, y + y0 + 0.035, y + y1 - 0.035, lit);
     wb(F, 0, 0.011, 0, 0.042, y + y0 + 0.035, y + y1 - 0.035, trim);
     if (y1 - y0 < 0.6) wb(F, 0, half, 0, 0.042, y + (y0 + y1) / 2 - 0.008, y + (y0 + y1) / 2 + 0.008, trim);
     if (y1 - y0 > 0.3) head(half + 0.035, y + y1);
@@ -758,8 +868,9 @@ function emitFacade(y, s, F, v, b, vv, cell) {
   if (onStreet(v, y) && house.shop && has(other, 0) && L > 0.3) {
     // shopfront with a striped awning
     const e = Math.min(L - 0.05, 0.42);
-    wb(F, 0, e, 0, 0.025, y + 0.1, y + 0.6, trim);
-    wb(F, 0, e - 0.04, 0, 0.034, y + 0.14, y + 0.56, gcol, lit);
+    frameRing(F, 0, e - 0.04, y + 0.14, y + 0.56, 0.04, trim, true);
+    hole(F, 0, e - 0.04, y + 0.14, y + 0.56, lit);
+    wb(F, 0, e - 0.04, 0, 0.022, y + 0.1, y + 0.14, lin(C.wood));
     const n = Math.max(2, Math.round(e / 0.075)), w = (e + 0.03) / n;
     const stripe = [lin(C.trim), lin(house.awning)];
     for (let i = 0; i < n; i++) wslab(F, i * w, (i + 1) * w, 0, y + 0.74, 0.26, y + 0.62, 0.03, stripe[i & 1]);
@@ -779,8 +890,8 @@ function emitFacade(y, s, F, v, b, vv, cell) {
   const pair = L > 0.34 && (house.windows === 'pair' || (house.windows === 'mix' && hh > 0.5));
   if (pair) {
     const sc = L * 0.55;
-    wb(F, sc - 0.1, sc + 0.1, 0, 0.025, y + 0.4, y + 0.75, trim);
-    wb(F, sc - 0.065, sc + 0.065, 0, 0.034, y + 0.435, y + 0.715, gcol, lit);
+    frameRing(F, sc - 0.065, sc + 0.065, y + 0.435, y + 0.715, 0.035, trim);
+    hole(F, sc - 0.065, sc + 0.065, y + 0.435, y + 0.715, lit);
     wb(F, sc - 0.006, sc + 0.006, 0, 0.042, y + 0.435, y + 0.715, trim);
     wb(F, sc - 0.065, sc + 0.065, 0, 0.042, y + 0.567, y + 0.583, trim);
     sill(sc - 0.12, sc + 0.12);
@@ -1161,7 +1272,12 @@ water.material.depthWrite = false;
 water.renderOrder = 1;
 // the AO pass renders the scene with an override material; the reflection must not re-render then
 const renderReflection = water.onBeforeRender;
-water.onBeforeRender = function (r, sc, cam) { if (!sc.overrideMaterial) renderReflection.call(this, r, sc, cam); };
+water.onBeforeRender = function (r, sc, cam) {
+  if (sc.overrideMaterial) return;
+  for (const m of WINFX) m.visible = false;
+  renderReflection.call(this, r, sc, cam);
+  for (const m of WINFX) m.visible = true;
+};
 scene.add(water);
 
 // grid lines that brighten around the cursor
@@ -1177,11 +1293,69 @@ const gridMat = new THREE.ShaderMaterial({
 });
 scene.add(new THREE.LineSegments(gridGeo, gridMat));
 
+// ---------- N3: voxel occupancy field ----------
+// The town's blocks are splatted into a coarse 3D texture and blurred. Every surface samples it a little
+// way out along its normal: crowded alleys, lower floors and corners darken smoothly, and because the
+// field only changes with the blocks, the shading never flickers the way screen-space AO can.
+const VOX = { res: 0.4, ox: -18, oy: 0, oz: -18, nx: 90, ny: 40, nz: 90 };
+const voxData = new Uint8Array(VOX.nx * VOX.ny * VOX.nz);
+const voxTex = new THREE.Data3DTexture(voxData, VOX.nx, VOX.ny, VOX.nz);
+voxTex.format = THREE.RedFormat; voxTex.type = THREE.UnsignedByteType;
+voxTex.minFilter = voxTex.magFilter = THREE.LinearFilter; voxTex.unpackAlignment = 1;
+voxTex.needsUpdate = true;
+const voxUniforms = {
+  tVox: { value: voxTex },
+  voxOrigin: { value: new THREE.Vector3(VOX.ox, VOX.oy, VOX.oz) },
+  voxSize: { value: new THREE.Vector3(VOX.nx * VOX.res, VOX.ny * VOX.res, VOX.nz * VOX.res) },
+};
+const VOX_GLSL = `precision highp sampler3D;
+uniform sampler3D tVox; uniform vec3 voxOrigin; uniform vec3 voxSize;
+float voxAO(vec3 wp, vec3 n) {
+  float o = texture(tVox, (wp + n * 0.38 - voxOrigin) / voxSize).r;
+  return clamp(1.0 - 1.1 * o, 0.45, 1.0);
+}`;
+function updateVoxels() {
+  const { res, ox, oy, oz, nx, ny, nz } = VOX, idx = (i, j, k) => i + nx * (j + ny * k);
+  let a = new Float32Array(nx * ny * nz), b = new Float32Array(nx * ny * nz);
+  for (const key of blocks.keys()) {
+    const [v, y] = parseKey(key), [x, z] = VERTS[v];
+    const y0 = y === 0 ? WATER - 0.3 : y, y1 = y === 0 ? GROUND : y + 1 + (has(v, y + 1) ? 0 : 0.3), r = 0.62;
+    const i0 = Math.max(0, Math.floor((x - r - ox) / res)), i1 = Math.min(nx - 1, Math.floor((x + r - ox) / res));
+    const k0 = Math.max(0, Math.floor((z - r - oz) / res)), k1 = Math.min(nz - 1, Math.floor((z + r - oz) / res));
+    const j0 = Math.max(0, Math.floor((y0 - oy) / res)), j1 = Math.min(ny - 1, Math.floor((y1 - oy) / res));
+    for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) {
+      const cx = ox + (i + 0.5) * res - x, cz = oz + (k + 0.5) * res - z;
+      if (cx * cx + cz * cz > r * r) continue;
+      for (let j = j0; j <= j1; j++) a[idx(i, j, k)] = 1;
+    }
+  }
+  // separable box blur, two cells each way, along x, y and z
+  const blur = (src, dst, dim) => {
+    const n = [nx, ny, nz][dim], step = [1, nx, nx * ny][dim];
+    const lines = nx * ny * nz / n;
+    for (let l = 0; l < lines; l++) {
+      let base;
+      if (dim === 0) base = l * nx;
+      else if (dim === 1) base = (l % nx) + Math.floor(l / nx) * nx * ny;
+      else base = l;
+      for (let t = 0; t < n; t++) {
+        let sum = 0, cnt = 0;
+        for (let q = -2; q <= 2; q++) { const u = t + q; if (u >= 0 && u < n) { sum += src[base + u * step]; cnt++; } }
+        dst[base + t * step] = sum / 5;
+      }
+    }
+  };
+  blur(a, b, 0); blur(b, a, 1); blur(a, b, 2);
+  for (let i = 0; i < voxData.length; i++) voxData[i] = Math.min(255, b[i] * 300);
+  voxTex.needsUpdate = true;
+}
+
 // materials for the baked town
 const mainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
 // painted materials: brick, tile and stone patterns are drawn from world position, each unit with
 // its own slight shift in tone and hue so surfaces look hand-made rather than flat
 mainMat.onBeforeCompile = sh => {
+  Object.assign(sh.uniforms, voxUniforms);
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\nattribute float kind;\nvarying float vKind;\nvarying vec3 vWP;\nvarying vec3 vWN;')
     .replace('#include <begin_vertex>', '#include <begin_vertex>\nvKind = kind;\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
@@ -1191,8 +1365,10 @@ varying float vKind;
 varying vec3 vWP;
 varying vec3 vWN;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+${VOX_GLSL}
 vec3 paint(vec3 base) {
   if (vKind < 0.5) return base;
+  if (vKind > 3.5) return base * 0.88;   // mortar behind instanced bricks
   vec3 n = normalize(vWN);
   vec2 sz; vec2 q;
   if (vKind < 1.5) { sz = vec2(0.23, 0.105); q = vec2(vWP.x * n.z - vWP.z * n.x, vWP.y); }
@@ -1220,21 +1396,77 @@ vec3 paint(vec3 base) {
   float l = dot(c, vec3(0.299, 0.587, 0.114));
   return mix(vec3(l), c, 1.18);
 }`)
-    .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = paint(diffuseColor.rgb);');
+    .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = paint(diffuseColor.rgb) * voxAO(vWP, normalize(vWN));');
 };
 const litMat = new THREE.MeshStandardMaterial({ vertexColors: true, color: '#41546b', roughness: 0.4, emissive: '#ffb04a', emissiveIntensity: 0 });
 const darkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35 });
 const foamMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false });
-const MATS = { main: mainMat, lit: litMat, dark: darkMat, foam: foamMat };
+const maskMat = new THREE.MeshBasicMaterial({
+  colorWrite: false, depthWrite: false,
+  stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
+});
+const roomMat = (hex) => new THREE.MeshBasicMaterial({
+  vertexColors: true, color: hex, side: THREE.BackSide, depthWrite: false, depthFunc: THREE.AlwaysDepth,
+  stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc,
+  stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
+});
+const roomLitMat = roomMat('#3a4658'), roomDarkMat = roomMat('#2b3443');
+const brickMat = new THREE.MeshStandardMaterial({ roughness: 0.84, metalness: 0 });
+brickMat.onBeforeCompile = sh => {
+  Object.assign(sh.uniforms, voxUniforms);
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+vec4 bwp = vec4(transformed, 1.0); vec3 bn = objectNormal;
+#ifdef USE_INSTANCING
+bwp = instanceMatrix * bwp; bn = mat3(instanceMatrix) * bn;
+#endif
+vWP = (modelMatrix * bwp).xyz; vWN = normalize(mat3(modelMatrix) * bn);`);
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;\n' + VOX_GLSL)
+    .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= voxAO(vWP, normalize(vWN));');
+};
+const MATS = { main: mainMat, lit: litMat, dark: darkMat, foam: foamMat, mask: maskMat, roomLit: roomLitMat, roomDark: roomDarkMat };
+// a chamfered unit cube: the hull of each corner pulled in along its three axes
+const BRICK_GEO = (() => {
+  const b = 0.22, pts = [];
+  for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) {
+    pts.push(new THREE.Vector3(x * (1 - b), y, z).multiplyScalar(0.5), new THREE.Vector3(x, y * (1 - b), z).multiplyScalar(0.5), new THREE.Vector3(x, y, z * (1 - b)).multiplyScalar(0.5));
+  }
+  const g = new ConvexGeometry(pts);
+  g.computeVertexNormals();
+  return g;
+})();
+// window cut-outs and bricks stay out of the reflection and the AO normal pass
+const WINFX = new Set();
 
 const treeGeo = new THREE.IcosahedronGeometry(1, 1);
 const treeMat = new THREE.MeshStandardMaterial({ color: C.leaf, roughness: 0.9, flatShading: true });
 
 function meshesFrom(m, pivot) {
   const g = new THREE.Group();
+  const bi = m.bricks.inst, nb = bi.length / BRICK_STRIDE;
+  if (nb) {
+    const im = new THREE.InstancedMesh(BRICK_GEO, brickMat, nb);
+    const mt = new THREE.Matrix4(), col = new THREE.Color(), px = pivot ? pivot[0] : 0, py = pivot ? pivot[1] : 0, pz = pivot ? pivot[2] : 0;
+    for (let i = 0; i < nb; i++) {
+      const o = i * BRICK_STRIDE, w = bi[o + 7], h = bi[o + 8], d = bi[o + 9];
+      // columns: along the wall, up, out of the wall
+      mt.set(bi[o + 3] * w, 0, bi[o + 5] * d, bi[o] - px,
+             0, h, 0, bi[o + 1] - py,
+             bi[o + 4] * w, 0, bi[o + 6] * d, bi[o + 2] - pz,
+             0, 0, 0, 1);
+      im.setMatrixAt(i, mt);
+      im.setColorAt(i, col.setRGB(bi[o + 10], bi[o + 11], bi[o + 12]));
+    }
+    // bricks only matter in the main view: they skip the shadow map, the AO normals and the reflection
+    im.castShadow = false; im.receiveShadow = true;
+    WINFX.add(im);
+    g.add(im);
+  }
   for (const name of Object.keys(m)) {
     const B = m[name];
-    if (!B.p.length) continue;
+    if (!B.p.length || name === 'bricks') continue;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(B.p, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(B.c, 3));
@@ -1242,13 +1474,23 @@ function meshesFrom(m, pivot) {
     if (pivot) geo.translate(-pivot[0], -pivot[1], -pivot[2]);
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, MATS[name]);
-    if (name !== 'foam') { mesh.castShadow = true; mesh.receiveShadow = true; } else mesh.renderOrder = 2;
+    if (name === 'mask' || name === 'roomLit' || name === 'roomDark') {
+      mesh.renderOrder = name === 'mask' ? 5 : 6;
+      WINFX.add(mesh);
+      mesh.addEventListener('removed', () => WINFX.delete(mesh));
+    } else if (name !== 'foam') { mesh.castShadow = true; mesh.receiveShadow = true; } else mesh.renderOrder = 2;
     g.add(mesh);
   }
   if (pivot) g.position.set(pivot[0], pivot[1], pivot[2]);
   return g;
 }
-function disposeGroup(g) { g.traverse(o => { if (o.geometry && o.geometry !== treeGeo) o.geometry.dispose(); if (o.isInstancedMesh) o.dispose(); }); }
+function disposeGroup(g) {
+  g.traverse(o => {
+    if (o.geometry && o.geometry !== treeGeo && o.geometry !== BRICK_GEO) o.geometry.dispose();
+    if (o.isInstancedMesh) o.dispose();
+    WINFX.delete(o);
+  });
+}
 
 let townObj = new THREE.Group(); scene.add(townObj);
 let pickMesh = null;
@@ -1261,9 +1503,10 @@ let prevSigs = new Map(), regen = null, ripple = [];
 function sigOf(m) {
   let s = 0, n = 0;
   for (const k in m) {
-    const p = m[k].p, c = m[k].c;
-    n += p.length;
+    const p = m[k].p, c = m[k].c, q = m[k].inst;
+    n += p.length + q.length;
     for (let i = 0; i < p.length; i++) s = (s * 1.0000037 + p[i] * (i % 13 + 1) + c[i] * 7.1) % 1e7;
+    for (let i = 0; i < q.length; i++) s = (s * 1.0000041 + q[i] * (i % 11 + 1)) % 1e7;
   }
   return n + ':' + s.toFixed(3);
 }
@@ -1272,6 +1515,7 @@ function appendMesh(dst, src) {
     const a = dst[k], b = src[k];
     for (let i = 0; i < b.p.length; i++) { a.p.push(b.p[i]); a.c.push(b.c[i]); }
     for (let i = 0; i < b.k.length; i++) a.k.push(b.k[i]);
+    for (let i = 0; i < b.inst.length; i++) a.inst.push(b.inst[i]);
   }
 }
 function clearRipple() {
@@ -1301,6 +1545,7 @@ function rebuild() {
   const now = performance.now(), sigs = new Map(), changed = [];
   doorCache = new Map(); isoCache = new Map(); gableCache = new Map(); stairCache = new Map();
   computeHouses();
+  updateVoxels();
   pickP = []; pickMeta = [];
   const trees = [], todo = new Set();
   for (const k of blocks.keys()) {
@@ -1812,6 +2057,7 @@ function cycleTime() {
   timeStart = performance.now();
   pluck(timeName === 'Night' ? 7 : timeName === 'Dusk' ? 5 : 9);
 }
+const _roomGlow = new THREE.Color(2.4, 1.55, 0.7);
 function applyTime() {
   sky.material.uniforms.top.value.copy(cur.top);
   sky.material.uniforms.horizon.value.copy(cur.horizon);
@@ -1822,6 +2068,8 @@ function applyTime() {
   water.material.uniforms.uFog.value.copy(cur.horizon);
   foamMat.color.copy(cur.foamCol);
   litMat.color.copy(cur.glass); litMat.emissiveIntensity = cur.glow;
+  roomLitMat.color.setRGB(0.045, 0.055, 0.075).lerp(_roomGlow, Math.min(1, cur.glow / 1.7));
+  roomDarkMat.color.setRGB(0.035, 0.042, 0.06).multiplyScalar(1 - 0.45 * Math.min(1, cur.glow / 1.7));
   bloom.strength = cur.bloom;
   gridMat.uniforms.uBase.value = 0.07 - 0.064 * Math.min(1, cur.glow / 1.7);
 }
@@ -1886,7 +2134,7 @@ soundBtn.onclick = () => {
 };
 
 // ---------- post-processing ----------
-const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4, stencilBuffer: true });
 const composer = new EffectComposer(renderer, rt);
 composer.addPass(new RenderPass(scene, camera));
 // soft contact shadows in the creases: roof against wall, wall against street, under eaves and arches
@@ -1894,12 +2142,23 @@ const lowPower = matchMedia('(pointer: coarse)').matches;
 let gtao = null;
 if (!lowPower) {
   gtao = new GTAOPass(scene, camera, 1, 1);
+  const hideAll = gtao.overrideVisibility.bind(gtao);
+  gtao.overrideVisibility = () => { hideAll(); for (const m of WINFX) m.visible = false; };
   gtao.blendIntensity = 0.9;
-  gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.3, thickness: 1.2, scale: 1.25, samples: 16 });
-  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 16 });
+  gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.3, thickness: 1.2, scale: 1.25, samples: 10 });
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, rings: 2, samples: 8 });
   composer.addPass(gtao);
 }
 window.harbourAO = on => { if (gtao) gtao.enabled = on; };
+// dev helper for building precise test scenes from the console
+window.harbourDev = {
+  vertexAt: (x, z) => vertexAt(x, z, 2), neighbors: v => vAdj[v].slice(), pos: v => VERTS[v],
+  build: list => commit(() => { for (const [v, y, c] of list) blocks.set(keyOf(v, y), { c: c || '#e8a3a0' }); }),
+  clear: () => commit(() => blocks.clear()),
+  bricks: on => { brickMat.visible = on; },
+  rooms: on => { maskMat.visible = roomLitMat.visible = roomDarkMat.visible = on; },
+  count: () => { let tris = 0, inst = 0; townObj.traverse(o => { if (o.isInstancedMesh) inst += o.count; else if (o.isMesh) tris += o.geometry.attributes.position.count / 3; }); return { tris: Math.round(tris), bricks: inst, brickTris: BRICK_GEO.attributes.position.count / 3 }; },
+};
 window.harbourStats = () => ({ blocks: blocks.size, houses: houses.length, rippling: ripple.length, doors: houses.reduce((n, h) => n + h.doors.size, 0) });
 // ink: screen-space outlines from the AO pass's depth and normal buffers, so the cost does not grow
 // with the town. Lines appear where depth jumps (silhouettes) or the surface turns (creases).
@@ -1910,11 +2169,28 @@ if (gtao) {
       tDiffuse: { value: null }, tNormal: { value: gtao.normalTexture }, tDepth: { value: gtao.depthTexture },
       resolution: { value: new THREE.Vector2(1, 1) }, cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
       inkColor: { value: new THREE.Color('#2a2430') }, strength: { value: 0.62 },
+      proj: { value: new THREE.Matrix4() }, projInv: { value: new THREE.Matrix4() }, lightView: { value: new THREE.Vector3(0, 1, 0) }, contactStrength: { value: 0.32 },
     },
     vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: `#include <packing>
 uniform sampler2D tDiffuse; uniform sampler2D tNormal; uniform sampler2D tDepth;
 uniform vec2 resolution; uniform float cameraNear; uniform float cameraFar; uniform vec3 inkColor; uniform float strength;
+uniform mat4 proj; uniform mat4 projInv; uniform vec3 lightView; uniform float contactStrength;
+vec3 viewPos(vec2 uv) { vec4 v = projInv * vec4(uv * 2.0 - 1.0, texture2D(tDepth, uv).x * 2.0 - 1.0, 1.0); return v.xyz / v.w; }
+// short screen-space ray march toward the sun: small things (sills, cornices, chimneys) cast crisp shadows
+float contact(vec2 uv, vec3 n) {
+  if (dot(n, lightView) < 0.05) return 0.0;
+  vec3 p = viewPos(uv) + n * 0.01;
+  for (int i = 1; i <= 6; i++) {
+    vec3 q = p + lightView * (0.05 * float(i));
+    vec4 c = proj * vec4(q, 1.0);
+    vec2 s = c.xy / c.w * 0.5 + 0.5;
+    if (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) return 0.0;
+    float dz = viewPos(s).z - q.z;
+    if (dz > 0.008 && dz < 0.25) return 1.0;
+  }
+  return 0.0;
+}
 varying vec2 vUv;
 float viewDepth(vec2 uv) { return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar); }
 void main() {
@@ -1928,9 +2204,10 @@ void main() {
     float d = viewDepth(vUv + offs[i]);
     vec3 n = texture2D(tNormal, vUv + offs[i]).xyz * 2.0 - 1.0;
     e = max(e, smoothstep(0.03, 0.09, (d - d0) / d0));
-    e = max(e, smoothstep(0.22, 0.45, 1.0 - dot(n, n0)));
+    e = max(e, smoothstep(0.42, 0.7, 1.0 - dot(n, n0)));
   }
   float fade = 1.0 - smoothstep(35.0, 110.0, d0);
+  c.rgb *= 1.0 - contactStrength * contact(vUv, n0) * (1.0 - smoothstep(20.0, 45.0, d0));
   c.rgb = mix(c.rgb, inkColor, e * strength * fade);
   gl_FragColor = c;
 }`,
@@ -2020,6 +2297,12 @@ function tick(now) {
   ghostLineMat.opacity = (0.55 + 0.35 * breathe) * ghostFade;
   controls.update();
   sun.target.position.set(0, 0, 0);
+  if (ink) {
+    ink.uniforms.proj.value.copy(camera.projectionMatrix);
+    ink.uniforms.projInv.value.copy(camera.projectionMatrixInverse);
+    ink.uniforms.lightView.value.copy(sun.position).sub(sun.target.position).normalize().transformDirection(camera.matrixWorldInverse);
+    ink.uniforms.contactStrength.value = 0.32 * Math.min(1, cur.sunI / 2.4);
+  }
   composer.render();
   requestAnimationFrame(tick);
 }

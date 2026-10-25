@@ -93,6 +93,19 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       is laid; a rising cascade of notes with the wave, a chime on landing, a soft poof on erase;
       the hover preview breathes. Honors prefers-reduced-motion.
 
+### Next-level round (techniques from Tiny Glade and Townscaper)
+
+- [x] **N1 Real bricks** — walls are covered in individually placed, instanced bricks with chamfered
+      edges, each slightly proud of the wall by a random amount and tinted on its own; quay walls get
+      big cut stones. The light catches every edge (Tiny Glade's approach).
+- [x] **N2 Cut-out windows** — windows are holes cut through the wall with the stencil buffer, showing
+      a small room behind; at night the rooms glow (Townscaper's approach).
+- [x] **N3 Soft shading** — a blurred 3D occupancy field of the town darkens alleys and lower floors
+      smoothly and never flickers; screen-space contact shadows toward the sun add crisp detail.
+- [x] **N4 Junction details and supports** — drainpipes where two house colours meet on a facade,
+      quoin stones on crisp corners, and iron stilt frames with bracing as an alternative to arches
+      for floors that overhang open water.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
@@ -115,5 +128,7 @@ Open `index.html` through any static server, for example:
 then visit http://localhost:8000. In the browser console, `harbourView(x, y, z, tx, ty, tz)`
 moves the camera, and `harbourAO(false)` turns ambient occlusion off for comparison
 (the ink outlines reuse the occlusion pass's buffers, so they are desktop-only too).
-`harbourStats()` reports blocks, houses, doors and how many pieces are still rippling. (The file is written without `<!doctype>`/`<head>` because it is
+`harbourStats()` reports blocks, houses, doors and how many pieces are still rippling.
+`harbourDev` builds precise test scenes (`build([[vertex, level, colour]])`, `clear()`, `vertexAt(x, z)`,
+`neighbors(v)`), toggles `bricks(on)` / `rooms(on)` and reports `count()` of triangles and bricks. (The file is written without `<!doctype>`/`<head>` because it is
 also published as a claude.ai artifact; browsers render it fine.)
