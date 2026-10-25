@@ -470,22 +470,6 @@ function gableOf(v, y) {
   return out;
 }
 const isGable = (v, y, u) => gableOf(v, y).includes(u);
-// exterior staircase: climbs along one long side of a two-storey house to a door on the first floor
-function stairOf(v) {
-  if (!stairCache.has(v)) {
-    let best = -1;
-    if (has(v, 0) && has(v, 1) && has(v, 2) && hash(v, 0, 19, 1) < 0.4) {
-      let bh = 2;
-      for (const n of vAdj[v]) {
-        if (has(n, 1) || has(n, 2) || n === doorOf(v)) continue;
-        const h = hash(Math.min(v, n), Math.max(v, n), 19, 2);
-        if (h < bh) { bh = h; best = n; }
-      }
-    }
-    stairCache.set(v, best);
-  }
-  return stairCache.get(v);
-}
 // corner rounding is a per-house trait, constant up the whole column
 function roundOf(v, y) {
   if (y >= 2 && isolated(v, y)) return gableOf(v, y).length ? 0.07 : 0.42;
@@ -527,7 +511,7 @@ function computeHouses() {
       windows: r(4) < 0.45 ? 'joint' : r(4) < 0.8 ? 'pair' : 'mix',
       head: r(5), shutters: r(6) < 0.45, flowers: r(7) > 0.6, balcony: 0.08 + r(8) * 0.22,
       shop: r(9) < 0.4, shutterCol: SHUTTERS[Math.floor(r(10) * SHUTTERS.length)],
-      awning: PALETTE[Math.floor(r(11) * PALETTE.length)].roof, quoins: r(13) < 0.55,
+      awning: PALETTE[Math.floor(r(11) * PALETTE.length)].roof, quoins: r(13) < 0.55, ivy: r(14) < 0.4, planters: r(15) < 0.6,
     };
     houseIdOf.set(v0, h.id);
     const q = [v0];
@@ -539,18 +523,7 @@ function computeHouses() {
         houseIdOf.set(n, h.id); h.cols.push(n); q.push(n);
       }
     }
-    // one main door on the side that best faces a street (a second one for wide houses)
-    const opts = [];
-    for (const v of h.cols) {
-      if (!has(v, 0) || !has(v, 1)) continue;
-      for (const n of vAdj[v]) if (!has(n, 1)) opts.push({ v, n, score: hash(v0, v, n, 5) + (has(n, 0) ? 0 : 1) });
-    }
-    opts.sort((x, y) => x.score - y.score);
-    h.doors = new Map();
-    for (const o of opts) {
-      if (h.doors.size >= (h.cols.length >= 4 ? 2 : 1)) break;
-      if (!h.doors.has(o.v)) h.doors.set(o.v, o.n);
-    }
+    h.doors = new Map();   // filled in by the planner
     // chimneys sit on the tallest columns
     const byHeight = h.cols.slice().sort((a, b) => topOf(b) - topOf(a) || hash(a, 0, 42, 1) - hash(b, 0, 42, 1));
     h.chimneys = new Set(byHeight.slice(0, h.cols.length >= 3 ? 2 : r(12) < 0.6 ? 1 : 0));
@@ -558,6 +531,153 @@ function computeHouses() {
   }
 }
 const roofOf = (v, y) => (houseOf(v) || {}).roof || '#c95f3c';
+
+// ---------- L0: scene planner ----------
+// Details are not rolled where they are drawn. Once per rebuild the planner reads the scene's structure
+// (what each street tile is, what each wall looks out onto, what kind of house it belongs to) and runs a
+// small rule table. Each rule says where a feature may go, what it needs, how many a house may have and
+// how far apart they must be; slots are reserved so features never collide. Drawing code only draws
+// what the plan says, and every placement keeps the reason it was made.
+const isOpen = v => has(v, 0) && !has(v, 1);
+function groundKind(v) {
+  if (!has(v, 0)) return 'water';
+  if (has(v, 1)) return 'built';
+  const nb = vAdj[v];
+  if (nb.length && nb.every(n => has(n, 1))) return 'courtyard';
+  if (nb.some(n => !has(n, 0))) return 'quay';
+  return nb.filter(isOpen).length >= 3 ? 'plaza' : 'lane';
+}
+// what the wall of corner v that faces corner n looks out onto at level y
+function sideContext(v, n, y) {
+  if (has(n, y)) return 'interior';
+  if (y === 1) return has(n, 0) ? groundKind(n) : 'water';
+  if (has(n, y - 1)) return 'roof';
+  return has(n, 0) ? 'over-street' : 'over-water';
+}
+const WALKABLE = new Set(['lane', 'plaza', 'courtyard', 'quay']);
+const STREETS = c => c === 'lane' || c === 'plaza' || c === 'quay';
+function houseType(h) {
+  const H = Math.max(...h.cols.map(topOf));
+  if (h.cols.length === 1 && H >= 3) return 'tower';
+  if (H <= 1) return 'cottage';
+  if (h.cols.length >= 3 && H <= 2) return 'warehouse';
+  return 'townhouse';
+}
+const sideKey = (v, n, y) => v + '>' + n + ':' + y;
+const edgeKey = (v, n) => v + '~' + n;
+// two houses facing each other across a lane, tall enough to hang laundry between
+function lanePair(v) {
+  const tall = vAdj[v].filter(n => has(n, 2));
+  let pair = null, best = 0.6;
+  for (let i = 0; i < tall.length; i++) for (let j = i + 1; j < tall.length; j++) {
+    const da = norm2(sub2(VERTS[tall[i]], VERTS[v])), db = norm2(sub2(VERTS[tall[j]], VERTS[v])), d = -(da[0] * db[0] + da[1] * db[1]);
+    if (d > best) { best = d; pair = [tall[i], tall[j]]; }
+  }
+  return pair;
+}
+// wall-side rules run in order and each claims the side's main slot; ivy is an overlay on top
+const SIDE_RULES = [
+  { kind: 'door', level: 1, ctx: c => WALKABLE.has(c), grounded: true, max: h => (h.cols.length >= 4 ? 2 : 1), p: () => 1,
+    why: 'opens onto a street, plaza, courtyard or quay' },
+  { kind: 'stairs', level: 1, ctx: STREETS, grounded: true, types: ['townhouse', 'warehouse'], max: () => 1, p: () => 0.5,
+    needs: (v, n) => has(v, 2) && !has(n, 2) && !PLAN.side.has(sideKey(v, n, 2)), claims: (v, n) => [sideKey(v, n, 2)],
+    why: 'climbs from the street to a first-floor door' },
+  { kind: 'shop', level: 1, ctx: STREETS, grounded: true, when: h => h.shop && h.type !== 'tower', max: () => 9, p: () => 1,
+    why: 'a shopfront on a frontage people walk past' },
+  { kind: 'balcony', level: 2, upward: true, ctx: c => c === 'over-street' || c === 'over-water', when: h => h.type !== 'warehouse',
+    max: h => h.cols.length + 1, p: h => h.balcony * 1.6, why: 'looks out over open space' },
+];
+const OVERLAY_RULES = [
+  { kind: 'ivy', level: 1, ctx: c => c === 'courtyard' || c === 'plaza' || c === 'lane' || c === 'quay', grounded: true,
+    when: h => h.ivy && h.type !== 'tower', max: () => 3, p: () => 0.7, why: 'climbs a quiet wall from the ground' },
+];
+// ground rules: features on open tiles and on quay edges, kept apart by a minimum spacing
+const NODE_RULES = [
+  { kind: 'tree', ctx: k => k === 'plaza', spacing: 2.6, p: 0.75, why: 'shade on an open plaza' },
+  { kind: 'laundry', ctx: k => k === 'lane', needs: v => !!lanePair(v), spacing: 1.6, p: 0.75, why: 'strung between two facing houses' },
+  { kind: 'lamp', ctx: k => k === 'plaza' || k === 'quay', spacing: 2.4, p: 1, why: 'lights a plaza or a quay' },
+];
+const EDGE_RULES = [
+  { kind: 'waterStairs', spacing: 3.2, p: 0.7, why: 'steps down to a moored rowboat' },
+  { kind: 'bench', spacing: 2.0, p: 0.7, why: 'a seat facing the water' },
+];
+let PLAN = { side: new Map(), over: new Map(), node: new Map(), edge: new Map(), log: [], issues: [] };
+function planScene() {
+  PLAN = { side: new Map(), over: new Map(), node: new Map(), edge: new Map(), log: [], issues: [] };
+  const note = (kind, at, why) => PLAN.log.push({ kind, at, why });
+  for (const h of houses) {
+    h.type = houseType(h);
+    h.doors = new Map();
+    const sides = [];
+    for (const v of h.cols) for (const n of vAdj[v]) for (let y = 1; y <= topOf(v); y++) {
+      if (has(v, y)) sides.push({ v, n, y, ctx: sideContext(v, n, y) });
+    }
+    const apply = (rule, map) => {
+      if (rule.types && !rule.types.includes(h.type)) return;
+      if (rule.when && !rule.when(h)) return;
+      const salt = rule.kind.charCodeAt(0) * 7 + rule.kind.length;
+      const cands = sides.filter(sd => (rule.upward ? sd.y >= rule.level : sd.y === rule.level) && rule.ctx(sd.ctx)
+        && (!rule.grounded || has(sd.v, 0)) && !map.has(sideKey(sd.v, sd.n, sd.y)) && (!rule.needs || rule.needs(sd.v, sd.n)))
+        .sort((a, b) => hash(h.anchor, a.v * 64 + a.y, a.n, salt) - hash(h.anchor, b.v * 64 + b.y, b.n, salt));
+      let count = 0;
+      for (const sd of cands) {
+        if (count >= rule.max(h)) break;
+        if (hash(h.anchor, sd.v * 64 + sd.y, sd.n, salt + 1) > rule.p(h)) continue;
+        const key = sideKey(sd.v, sd.n, sd.y), extra = rule.claims ? rule.claims(sd.v, sd.n) : [];
+        if (map.has(key) || extra.some(k => map.has(k))) continue;
+        map.set(key, rule.kind);
+        for (const k of extra) map.set(k, rule.kind + 'Top');
+        if (rule.kind === 'door') h.doors.set(sd.v, sd.n);
+        note(rule.kind, key, rule.why);
+        count++;
+      }
+    };
+    for (const rule of SIDE_RULES) apply(rule, PLAN.side);
+    for (const rule of OVERLAY_RULES) apply(rule, PLAN.over);
+  }
+  // open ground: tiles first, then quay edges, each with spacing against its own kind
+  const open = [];
+  for (let v = 0; v < VERTS.length; v++) if (!vFixed[v] && isOpen(v)) open.push(v);
+  for (const rule of NODE_RULES) {
+    const placed = [], salt = rule.kind.charCodeAt(0);
+    const cands = open.filter(v => !PLAN.node.has(v) && rule.ctx(groundKind(v)) && (!rule.needs || rule.needs(v)))
+      .sort((a, b) => hash(a, 0, 71, salt) - hash(b, 0, 71, salt));
+    for (const v of cands) {
+      if (hash(v, 0, 72, salt) > rule.p) continue;
+      const P = VERTS[v];
+      if (placed.some(q => Math.hypot(q[0] - P[0], q[1] - P[1]) < rule.spacing)) continue;
+      placed.push(P); PLAN.node.set(v, rule.kind); note(rule.kind, 'tile ' + v, rule.why);
+    }
+  }
+  const edges = [];
+  for (const v of open) for (const n of vAdj[v]) if (!has(n, 0)) {
+    const shared = vCells[v].map(([ci]) => ci).filter(ci => vCells[n].some(([cj]) => cj === ci));
+    if (shared.length) edges.push({ v, n, cell: Math.min(...shared), mid: l2(VERTS[v], VERTS[n], 0.5) });
+  }
+  for (const rule of EDGE_RULES) {
+    const placed = [], salt = rule.kind.charCodeAt(0);
+    const cands = edges.filter(e => !PLAN.edge.has(edgeKey(e.v, e.n))).sort((a, b) => hash(a.v, a.n, 73, salt) - hash(b.v, b.n, 73, salt));
+    for (const e of cands) {
+      if (hash(e.v, e.n, 74, salt) > rule.p) continue;
+      if (placed.some(q => Math.hypot(q[0] - e.mid[0], q[1] - e.mid[1]) < rule.spacing)) continue;
+      placed.push(e.mid); PLAN.edge.set(edgeKey(e.v, e.n), { kind: rule.kind, cell: e.cell }); note(rule.kind, 'edge ' + edgeKey(e.v, e.n), rule.why);
+    }
+  }
+  // a street-level floor over open water shelters a boat: a boathouse
+  for (let v = 0; v < VERTS.length; v++) {
+    if (has(v, 1) && !has(v, 0) && !vFixed[v] && hash(v, 1, 47, 1) < 0.75) { PLAN.node.set(v, 'boat'); note('boat', 'tile ' + v, 'a boathouse under an arch over the water'); }
+  }
+  validatePlan();
+}
+// the validator re-checks every placement against the rules' intent and reports anything illogical
+function validatePlan() {
+  for (const [key, kind] of PLAN.side) {
+    const [vn, y] = key.split(':'), [v, n] = vn.split('>').map(Number);
+    if (kind === 'door' && !(has(n, 0) && !has(n, 1))) PLAN.issues.push('door into nowhere at ' + key);
+    if (kind === 'stairs' && !(PLAN.side.get(sideKey(v, n, 2)) === 'stairsTop' && has(n, 0))) PLAN.issues.push('stairs without a top door or a street at ' + key);
+    if (kind === 'balcony' && has(n, +y)) PLAN.issues.push('balcony against a wall at ' + key);
+  }
+}
 
 
 let pickP = [], pickMeta = [];
@@ -628,6 +748,10 @@ function emitCellLevel(ci, y) {
       const stilt = isStilted(v, y), ceil = lin(stilt ? IRON2 : shade(b.c, 0.55)), cy = stilt ? y - 0.1 : y + ARCH;
       for (let i = 0; i < R.length - 1; i++) face('main', [P3(Vq, cy), P3(R[i].p, cy), P3(R[i + 1].p, cy)], ceil, P3(Vq, y + 5));
       for (let i = 0; i < R.length - 1; i++) pickTri(P3(Vq, y), P3(R[i].p, y), P3(R[i + 1].p, y), { v, y, t: 'bottom' });
+      if (y === 1 && !stilt && PLAN.node.get(v) === 'boat' && vCells[v][0][0] === ci) {
+        const nb = vAdj[v][Math.floor(hash(v, 1, 47, 2) * vAdj[v].length)], t = norm2(sub2(VERTS[nb], VERTS[v]));
+        rowboat(Vq[0], Vq[1], t, v);
+      }
     }
     if (!fa[q]) {
       emitRoof(ci, q, y, v, b, R, Vq);
@@ -741,6 +865,47 @@ function emitWall(cell, y, s, v, b, supported, vv) {
     if (crisp) emitQuoins(F, y, from, top, (s.k === s.own ? 0 : 1) + y);
     if (!s.curve) emitFacade(y, s, F, v, b, vv, cell);
     if (!lowPower) brickRows(F, from, top, col, OPEN);
+    if (!s.curve && street) {
+      const va = vv[s.k], vb = vv[nx4(s.k)], lo = Math.min(va, vb), hi = Math.max(va, vb);
+      if (PLAN.over.get(sideKey(v, va === v ? vb : va, 1)) === 'ivy') {
+        // ivy grows as vines from a few roots at the foot of the wall: each climbs with a gentle sway,
+        // branches now and then, thins toward the top, and stops at windows and at the building's height
+        const reach = has(v, 2) ? (has(v, 3) ? 2.3 : 1.65) : 0.82;
+        const roots = 1 + Math.floor(hash(lo, hi, 0, 56) * Math.max(1, F.L / 0.22));
+        for (let r = 0; r < roots; r++) {
+          // roots go in the gaps between windows and doors
+          const clearAt = sx => !OPEN.some(o => sx > o[0] - 0.03 && sx < o[1] + 0.03);
+          let s0 = -1;
+          for (let t = 0; t < 8 && s0 < 0; t++) { const c = 0.05 + hash(lo, hi, r * 8 + t, 57) * Math.max(0.01, F.L - 0.1); if (clearAt(c)) s0 = c; }
+          if (s0 < 0) continue;
+          const H = reach * (0.55 + 0.45 * hash(lo, hi, r, 58));
+          const steps = Math.floor(H / 0.04), ph = hash(lo, hi, r, 59) * 6.28;
+          for (let k = 0; k < steps; k++) {
+            const yy = 0.03 + k * 0.04, u = k / steps;
+            const lean = (hash(lo, hi, r, 63) - 0.5) * 0.5 * u;   // vines drift sideways as they climb
+            let sx = Math.min(F.L - 0.02, Math.max(0.02, s0 + Math.sin(yy * 3.2 + ph) * (0.03 + 0.06 * u) + lean));
+            // a window in the way: the vine steers around its nearer edge instead of stopping
+            const block = OPEN.find(o => sx > o[0] && sx < o[1] && y + yy > o[2] && y + yy < o[3]);
+            if (block) {
+              const left = block[0] - 0.03, right = block[1] + 0.03;
+              sx = Math.abs(sx - left) < Math.abs(right - sx) ? left : right;
+              if (sx < 0.02 || sx > F.L - 0.02) break;
+            }
+            const rad = 0.052 * (1 - 0.5 * u) + 0.014, leaf = LEAVES[Math.floor(hash(lo, hi, r * 97 + k, 60) * LEAVES.length)];
+            const x = F.a[0] + F.t[0] * sx + F.n[0] * 0.028, z = F.a[1] + F.t[1] * sx + F.n[1] * 0.028;
+            blob(x, y + yy, z, rad, rad * 0.9, rad * 0.42, leaf, F);
+            // side shoots fan wider with height; the foot of the vine is a bushy clump
+            const shoots = k < 3 ? 2 : (k % 2 === 1 && u < 0.85 ? 1 : 0);
+            for (let b2 = 0; b2 < shoots; b2++) {
+              const side = (k < 3 ? (b2 ? 1 : -1) : (hash(lo, hi, r * 31 + k, 61) < 0.5 ? -1 : 1));
+              const bx = Math.min(F.L - 0.02, Math.max(0.02, sx + side * (0.05 + 0.08 * u + 0.03 * hash(lo, hi, k, 64))));
+              const x2 = F.a[0] + F.t[0] * bx + F.n[0] * 0.026, z2 = F.a[1] + F.t[1] * bx + F.n[1] * 0.026;
+              blob(x2, y + yy + 0.015, z2, rad * 0.75, rad * 0.7, rad * 0.38, LEAVES[(Math.floor(hash(lo, hi, k, 65) * 5))], F);
+            }
+          }
+        }
+      }
+    }
     if (stilt) emitStilts(F, s, y, supportBase(v, y), v);
     return;
   }
@@ -801,7 +966,8 @@ function emitFacade(y, s, F, v, b, vv, cell) {
 
   // exterior staircase: the lower half climbs from the quay to the joint, the upper half
   // continues to a landing and a first-floor door at the far corner
-  if (stairOf(v) === other && (y === 1 || y === 2)) {
+  const planned = PLAN.side.get(sideKey(v, other, y));
+  if (planned === 'stairs' || planned === 'stairsTop') {
     const role = cell.i < cell.nb[s.k] ? 'low' : 'high';
     if (y === 1) { emitStairs(F, role, y); return; }
     if (role === 'high' && L > 0.3) {
@@ -816,7 +982,7 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     }
   }
 
-  if (onStreet(v, y) && doorOf(v) === other) {
+  if (planned === 'door') {
     wb(F, 0, 0.21, 0, 0.025, y, y + 0.74, trim);
     wb(F, 0, 0.16, 0, 0.04, y, y + 0.66, lin(C.wood));
     OPEN.push([-0.01, 0.25, y - 0.1, y + 0.9]);
@@ -826,6 +992,14 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     if (L > 0.33) {
       wb(F, 0.27, 0.32, 0, 0.07, y + 0.52, y + 0.62, lin(C.lamp), 'lit');
       wb(F, 0.285, 0.305, 0, 0.07, y + 0.62, y + 0.66, lin(C.wood));
+    }
+    const hs = houseOf(v);
+    if (hs && hs.planters && L > 0.42) {
+      // a potted shrub on each side of the door
+      wb(F, 0.31, 0.39, 0.05, 0.13, y, y + 0.12, lin('#b8694c'));
+      wb(F, 0.3, 0.4, 0.04, 0.14, y + 0.12, y + 0.14, lin(shade('#b8694c', 0.85)));
+      const px = F.a[0] + F.t[0] * 0.35 + F.n[0] * 0.09, pz = F.a[1] + F.t[1] * 0.35 + F.n[1] * 0.09;
+      blob(px, y + 0.24, pz, 0.075, 0.1, 0.075, LEAVES[Math.floor(hash(lo, hi, 1, 50) * LEAVES.length)]);
     }
     return;
   }
@@ -865,7 +1039,7 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     if (y1 - y0 < 0.6) wb(F, 0, half, 0, 0.042, y + (y0 + y1) / 2 - 0.008, y + (y0 + y1) / 2 + 0.008, trim);
     if (y1 - y0 > 0.3) head(half + 0.035, y + y1);
   };
-  if (onStreet(v, y) && house.shop && has(other, 0) && L > 0.3) {
+  if (planned === 'shop' && L > 0.3) {
     // shopfront with a striped awning
     const e = Math.min(L - 0.05, 0.42);
     frameRing(F, 0, e - 0.04, y + 0.14, y + 0.56, 0.04, trim, true);
@@ -874,13 +1048,28 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     const n = Math.max(2, Math.round(e / 0.075)), w = (e + 0.03) / n;
     const stripe = [lin(C.trim), lin(house.awning)];
     for (let i = 0; i < n; i++) wslab(F, i * w, (i + 1) * w, 0, y + 0.74, 0.26, y + 0.62, 0.03, stripe[i & 1]);
+    if (L > e + 0.12) {
+      // crates of produce stacked beside the shopfront
+      const s0 = e + 0.02, crate = lin('#c9a273');
+      wb(F, s0, s0 + 0.1, 0.03, 0.15, y, y + 0.09, crate);
+      wb(F, s0 + 0.01, s0 + 0.09, 0.05, 0.13, y + 0.09, y + 0.16, lin(shade('#c9a273', 0.9)));
+      const fx = F.a[0] + F.t[0] * (s0 + 0.05) + F.n[0] * 0.09, fz = F.a[1] + F.t[1] * (s0 + 0.05) + F.n[1] * 0.09;
+      const fruit = ['#e2574c', '#f2b33d', '#8cbf4f'][Math.floor(hash(lo, hi, 2, 55) * 3)];
+      for (const [dx, dz] of [[-0.02, -0.02], [0.02, 0.01], [-0.01, 0.025]]) blob(fx + dx, y + 0.175, fz + dz, 0.022, 0.02, 0.022, fruit);
+    }
     return;
   }
   if (hh < 0.06) return;   // an occasional blank wall, the same on every floor
-  if (y >= 2 && !has(other, y - 1) && !has(other, y) && hash(lo, hi, y, 25) < house.balcony) {
+  if (planned === 'balcony') {
     // french window with a balcony
     jointWindow(0.1, 0.03, 0.82);
     wslab(F, 0, 0.3, 0, y + 0.02, 0.22, y + 0.02, 0.035, trim);
+    if (hash(lo, hi, y, 52) < 0.7) {
+      wb(F, 0.2, 0.26, 0.08, 0.14, y + 0.055, y + 0.13, lin('#b8694c'));
+      const bx = F.a[0] + F.t[0] * 0.23 + F.n[0] * 0.11, bz = F.a[1] + F.t[1] * 0.23 + F.n[1] * 0.11;
+      blob(bx, y + 0.17, bz, 0.05, 0.05, 0.05, LEAVES[Math.floor(hash(lo, hi, y, 53) * 5)]);
+      blob(bx, y + 0.21, bz, 0.025, 0.025, 0.025, BLOOMS[Math.floor(hash(lo, hi, y, 54) * BLOOMS.length)]);
+    }
     wb(F, 0, 0.3, 0.2, 0.22, y + 0.27, y + 0.29, trim);
     wb(F, 0.28, 0.3, 0, 0.22, y + 0.27, y + 0.29, trim);
     for (const sx of [0.03, 0.09, 0.15, 0.21, 0.28]) wb(F, sx, sx + 0.012, 0.2, 0.212, y + 0.055, y + 0.27, trim);
@@ -1110,9 +1299,22 @@ function emitGroundCell(ci) {
         const sa = pt(R[i], EDGE + 1.0), sc = pt(R[i + 1], EDGE + 1.0);
         face('main', [P3(a, WATER - 0.14), P3(c, WATER - 0.14), P3(sc, WATER - 0.85), P3(sa, WATER - 0.85)], lin('#d9c69c'), P3(Vq, WATER - 3));
         pickQuad(P3(a, WATER), P3(c, WATER), P3(c, GROUND), P3(a, GROUND), { v, y: 0, t: 'side', cands: [vv[nx4(q)], vv[pv4(q)]] });
-        const stairs = i === 0 && !R[1].cv && !has(v, 1) && hash(v, ci, q, 8) < 0.3;
-        if (stairs) waterStairs(a, c, Vq);
-        else if (!has(v, 1)) railing(pt(R[i], EDGE - 0.02), pt(R[i + 1], EDGE - 0.02), GROUND + 0.045);
+        // the planned feature on this quay edge, drawn once, in the cell the planner chose
+        const facing = i === 0 ? vv[nx4(q)] : i === R.length - 2 ? vv[pv4(q)] : -1;
+        const straight = !(R[i].cv && R[i + 1].cv), L2 = Math.hypot(c[0] - a[0], c[1] - a[1]);
+        const ef = facing >= 0 && straight ? PLAN.edge.get(edgeKey(v, facing)) : null;
+        const here = ef && ef.cell === ci && L2 > 0.3 ? ef.kind : null;
+        if (here === 'waterStairs') waterStairs(a, c, Vq);
+        else if (!has(v, 1)) {
+          railing(pt(R[i], EDGE - 0.02), pt(R[i + 1], EDGE - 0.02), GROUND + 0.045);
+          // a bench behind the railing, facing the water
+          if (here === 'bench') {
+            const F = { a, t: norm2(sub2(c, a)), n: outward(a, c, Vq), L: L2 }, sc = L2 * 0.5, wood = lin('#9a6b45'), G = GROUND + 0.015;
+            wb(F, sc - 0.13, sc + 0.13, -0.21, -0.12, G + 0.1, G + 0.125, wood);
+            wb(F, sc - 0.13, sc + 0.13, -0.225, -0.205, G + 0.125, G + 0.25, wood);
+            for (const e of [-0.11, 0.1]) wb(F, sc + e, sc + e + 0.015, -0.21, -0.125, G, G + 0.1, IRON);
+          }
+        }
       }
     }
     if (has(v, 1) || isCourtyard(v)) continue;
@@ -1129,17 +1331,83 @@ function emitGroundCell(ci) {
       const corners = [P(u0, w0), P(u1, w0), P(u1, w1), P(u0, w1)];
       hexa('main', [...corners.map(c => P3(c, GROUND - 0.01)), ...corners.map(c => P3(c, top))], col, [0.8, 0.8, 0.8, 0.8, 1, 1, 1, 1]);
     }
-    // street furniture on some rounded corners
-    if (convex(q) && hash(v, ci, 7, 7) < 0.3) {
-      const r = R[Math.floor(R.length / 2)], p = pt(r, EDGE - 0.1);
-      const iron = lin('#4a5560');
-      boxAt(p[0], p[1], 0.028, GROUND, GROUND + 0.07, iron);
-      boxAt(p[0], p[1], 0.011, GROUND + 0.07, GROUND + 0.5, iron);
-      boxAt(p[0], p[1], 0.032, GROUND + 0.5, GROUND + 0.58, lin(C.lamp), 'lit');
-      boxAt(p[0], p[1], 0.042, GROUND + 0.58, GROUND + 0.6, iron);
+    // planned features on this open tile, drawn once by the tile's first cell
+    if (vCells[v][0][0] === ci) emitTileFeature(v, PLAN.node.get(v));
+  }
+}
+function emitTileFeature(v, kind) {
+  if (!kind) return;
+  const [x, z] = VERTS[v];
+  if (kind === 'tree') plantedTree(x, z, v);
+  if (kind === 'lamp') {
+    // on a quay the lamp stands near the water's edge; on a plaza, in the middle
+    const water = vAdj[v].find(n => !has(n, 0));
+    const p = water !== undefined ? l2(VERTS[v], VERTS[water], 0.36) : [x, z], iron = lin('#4a5560');
+    boxAt(p[0], p[1], 0.03, GROUND, GROUND + 0.07, iron);
+    boxAt(p[0], p[1], 0.012, GROUND + 0.07, GROUND + 0.62, iron);
+    boxAt(p[0], p[1], 0.036, GROUND + 0.62, GROUND + 0.71, lin(C.lamp), 'lit');
+    boxAt(p[0], p[1], 0.046, GROUND + 0.71, GROUND + 0.735, iron);
+  }
+  if (kind === 'laundry') {
+    const pair = lanePair(v);
+    if (!pair) return;
+    const [pa, pb] = pair.map(n => VERTS[n]), dir = norm2(sub2(pb, pa)), span = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+    if (span - 0.92 < 0.3) return;
+    const Y = 2.62, a3 = [pa[0] + dir[0] * 0.46, Y, pa[1] + dir[1] * 0.46], b3 = [pb[0] - dir[0] * 0.46, Y, pb[1] - dir[1] * 0.46];
+    const N = 6, pts = [];
+    for (let k = 0; k <= N; k++) { const u = k / N; pts.push([a3[0] + (b3[0] - a3[0]) * u, Y - 0.36 * u * (1 - u), a3[2] + (b3[2] - a3[2]) * u]); }
+    for (let k = 0; k < N; k++) rod(pts[k], pts[k + 1], 0.005, lin('#e9e2d4'));
+    const cloths = ['#f4f1ec', '#9cc5e3', '#e8a3a0', '#f5e6b8', '#a8d5ba'];
+    for (let k = 1; k < N; k++) {
+      if (hash(v, k, 62, 1) < 0.25) continue;
+      const p = pts[k], w = 0.05 + hash(v, k, 62, 2) * 0.04, hgt = 0.1 + hash(v, k, 62, 3) * 0.08;
+      wb({ a: [p[0], p[2]], t: dir, n: [-dir[1], dir[0]], L: 0 }, -w, w, -0.004, 0.004, p[1] - hgt, p[1] - 0.004, lin(cloths[Math.floor(hash(v, k, 62, 4) * cloths.length)]));
     }
   }
 }
+// ---------- L3/L4: greenery and props ----------
+const ICO = (() => {
+  const p = new THREE.IcosahedronGeometry(1, 0).attributes.position.array, tris = [];
+  for (let i = 0; i < p.length; i += 9) tris.push([[p[i], p[i + 1], p[i + 2]], [p[i + 3], p[i + 4], p[i + 5]], [p[i + 6], p[i + 7], p[i + 8]]]);
+  return tris;
+})();
+const LEAVES = ['#6f9e5c', '#5f8f4e', '#7fae63', '#88b86a', '#679a57'];
+const BLOOMS = ['#f2a7b5', '#fbe7a1', '#f4f1ec', '#e8a3a0', '#c7b3e6', '#f6c28b'];
+// a faceted leafy blob; with a wall frame it can be flattened against the wall
+function blob(cx, cy, cz, rx, ry, rz, hex, axes = null) {
+  const col = lin(hex);
+  for (const tri of ICO) {
+    const pts = tri.map(([x, y, z]) => axes
+      ? [cx + axes.t[0] * x * rx + axes.n[0] * z * rz, cy + y * ry, cz + axes.t[1] * x * rx + axes.n[1] * z * rz]
+      : [cx + x * rx, cy + y * ry, cz + z * rz]);
+    face('main', pts, col, [cx, cy, cz], tri.map(([, y]) => 0.82 + 0.22 * (y + 1) / 2));
+  }
+}
+// a thin rod between two 3D points (ropes, poles)
+function rod(a, b, r, col) {
+  const dx = b[0] - a[0], dz = b[2] - a[2], L = Math.hypot(dx, dz) || 1, sx = -dz / L * r, sz = dx / L * r;
+  hexa('main', [[a[0] - sx, a[1] - r, a[2] - sz], [b[0] - sx, b[1] - r, b[2] - sz], [b[0] + sx, b[1] - r, b[2] + sz], [a[0] + sx, a[1] - r, a[2] + sz],
+                [a[0] - sx, a[1] + r, a[2] - sz], [b[0] - sx, b[1] + r, b[2] - sz], [b[0] + sx, b[1] + r, b[2] + sz], [a[0] + sx, a[1] + r, a[2] + sz]], col);
+}
+// a little rowboat lying along direction t, centred at (x, z)
+function rowboat(x, z, t, seed) {
+  const n = [-t[1], t[0]], F = { a: [x - t[0] * 0.28, z - t[1] * 0.28], t, n, L: 0.56 };
+  const wood = lin(C.wood), rim = lin(PALETTE[Math.floor(hash(seed, 3, 3, 48) * PALETTE.length)].wall);
+  wb(F, 0.06, 0.5, -0.09, 0.09, WATER - 0.03, WATER + 0.05, wood);
+  wb(F, 0.0, 0.56, -0.11, 0.11, WATER + 0.05, WATER + 0.09, rim);
+  wb(F, 0.0, 0.56, -0.08, 0.08, WATER + 0.06, WATER + 0.075, lin(shade(C.wood, 0.6)));
+  wb(F, 0.24, 0.32, -0.1, 0.1, WATER + 0.08, WATER + 0.1, lin(C.flat));
+}
+// a tree in a round planter
+function plantedTree(x, z, seed) {
+  boxAt(x, z, 0.13, GROUND, GROUND + 0.1, lin(C.stoneLip));
+  boxAt(x, z, 0.11, GROUND + 0.1, GROUND + 0.105, lin('#6b5845'));
+  boxAt(x, z, 0.025, GROUND + 0.1, GROUND + 0.5, lin(C.wood));
+  const leaf = LEAVES[Math.floor(hash(seed, 1, 1, 49) * LEAVES.length)], s = 0.24 + hash(seed, 2, 2, 49) * 0.08;
+  blob(x, GROUND + 0.66, z, s, s * 1.05, s, leaf);
+  blob(x + 0.08, GROUND + 0.86, z - 0.05, s * 0.68, s * 0.7, s * 0.68, LEAVES[(Math.floor(hash(seed, 3, 3, 49) * 5))]);
+}
+
 // a thin iron railing: posts at even spacing and two rails, joined across cells by shared endpoints
 const IRON = lin('#2f3338');
 function railing(a, c, base) {
@@ -1172,6 +1440,10 @@ function waterStairs(a, c, inside) {
   const bx = F.a[0] + F.t[0] * (run + 0.12) - F.n[0] * 0.08, bz = F.a[1] + F.t[1] * (run + 0.12) - F.n[1] * 0.08;
   boxAt(bx, bz, 0.03, GROUND, GROUND + 0.1, iron);
   boxAt(bx, bz, 0.04, GROUND + 0.1, GROUND + 0.125, iron);
+  // the reason for the stairs: a rowboat tied up alongside, its painter rope looped over the bollard
+  const ox = F.a[0] + F.t[0] * (run + 0.18) + F.n[0] * 0.32, oz = F.a[1] + F.t[1] * (run + 0.18) + F.n[1] * 0.32;
+  rowboat(ox, oz, F.t, Math.round(ox * 31 + oz * 17));
+  rod([bx, GROUND + 0.11, bz], [ox - F.t[0] * 0.26, WATER + 0.09, oz - F.t[1] * 0.26], 0.006, lin('#c8b48a'));
 }
 // a street tile hemmed in by houses on every side becomes a little garden
 function isCourtyard(v) {
@@ -1559,6 +1831,7 @@ function rebuild() {
   const now = performance.now(), sigs = new Map(), changed = [];
   doorCache = new Map(); isoCache = new Map(); gableCache = new Map(); stairCache = new Map();
   computeHouses();
+  planScene();
   updateVoxels();
   pickP = []; pickMeta = [];
   const trees = [], todo = new Set();
@@ -1985,10 +2258,14 @@ function setGhost(t, erase) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(M.main.p, 3));
   M = prev;
-  ghost.add(new THREE.Mesh(geo, ghostMat));
+  const gm = new THREE.Mesh(geo, ghostMat);
+  WINFX.add(gm);
+  ghost.add(gm);
   const lg = new THREE.BufferGeometry();
   lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
-  ghost.add(new THREE.LineSegments(lg, ghostLineMat));
+  const gl2 = new THREE.LineSegments(lg, ghostLineMat);
+  WINFX.add(gl2);
+  ghost.add(gl2);
   const under = blocks.get(keyOf(t.v, t.y - 1));
   const mixedCol = t.y >= 2 && under ? under.c : nextMixed;
   ghostMat.color.set(erase ? '#d4574a' : (colorChoice === 'mixed' ? mixedCol : colorChoice));
@@ -2181,6 +2458,15 @@ window.harbourDev = {
   bricks: on => { brickMat.visible = on; },
   rooms: on => { maskMat.visible = roomLitMat.visible = roomDarkMat.visible = on; },
   info: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
+  // what the planner placed, why, and anything the validator found illogical
+  plan: () => {
+    const counts = {};
+    for (const e of PLAN.log) counts[e.kind] = (counts[e.kind] || 0) + 1;
+    const types = {};
+    for (const h of houses) types[h.type] = (types[h.type] || 0) + 1;
+    return { counts, houseTypes: types, issues: PLAN.issues.slice(0, 20), sample: PLAN.log.slice(0, 8) };
+  },
+  why: v => PLAN.log.filter(e => e.at.startsWith(v + '>') || e.at === 'tile ' + v || e.at.startsWith('edge ' + v + '~')),
   toggle: { shadows: on => { renderer.shadowMap.autoUpdate = on; }, bloom: on => { bloom.enabled = on; }, reflection: on => { water.visible = on; } },
   count: () => { let tris = 0, inst = 0; townObj.traverse(o => { if (o.isInstancedMesh) inst += o.count; else if (o.isMesh) tris += o.geometry.attributes.position.count / 3; }); return { tris: Math.round(tris), bricks: inst, brickTris: BRICK_GEO.attributes.position.count / 3 }; },
 };

@@ -106,6 +106,25 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       quoin stones on crisp corners, and iron stilt frames with bracing as an alternative to arches
       for floors that overhang open water.
 
+### Logic and life round (every detail needs a reason)
+
+- [x] **L0 Scene planner** — once per rebuild, the planner analyses the scene: each street tile is a
+      lane, plaza, courtyard or quay; each house is a cottage, townhouse, tower or warehouse; each wall
+      side knows what it faces (a street kind, water, a roof below, open air over a street or water).
+      A declarative rule table then places features: each rule states where it may go, what it needs,
+      how many a house may have and how far apart they must be. Slots are reserved so features never
+      collide, every placement records its reason, and a validator re-checks the result
+      (`harbourDev.plan()`, `harbourDev.why(vertex)`). Drawing code only draws the plan.
+- [x] **L1 Access logic** — doors only open onto walkable ground; exterior stairs need a street at the
+      foot and claim the first-floor side for their top door; balconies only overlook open space.
+- [x] **L2 Purposeful water edges** — water stairs are spaced along quays and always have a rowboat
+      moored at the bottom; a street-level floor over open water becomes a boathouse with a boat.
+- [x] **L3 Greenery** — ivy grows as vines from roots between windows and steers around openings;
+      potted shrubs flank doors of houses that like planters; trees in planters on open plazas; pots on
+      balconies.
+- [x] **L4 Street life** — lamps spaced along quays and plazas, benches on quays facing the water,
+      crates of produce outside shops, laundry across lanes between two facing tall houses.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
