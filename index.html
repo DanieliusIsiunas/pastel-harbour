@@ -133,6 +133,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 // ---------- palette ----------
 const PALETTE = [
@@ -293,7 +295,9 @@ function W(cell, u, v, y) {
 }
 
 let M = null, MB = null, MA = null;
-const newMesh = () => ({ main: { p: [], c: [] }, lit: { p: [], c: [] }, dark: { p: [], c: [] }, foam: { p: [], c: [] } });
+// surface kind for the painted-material shader: 0 plain, 1 brick wall, 2 roof tiles, 3 cut stone
+let KIND = 0;
+const newMesh = () => ({ main: { p: [], c: [], k: [] }, lit: { p: [], c: [], k: [] }, dark: { p: [], c: [], k: [] }, foam: { p: [], c: [], k: [] } });
 const setTarget = key => { M = (MA && key === anim.key) ? MA : MB; };
 
 function face(bk, pts, col, ref, sh) {
@@ -317,6 +321,7 @@ function face(bk, pts, col, ref, sh) {
     const p = pts[i], s = sh ? sh[i] : 1;
     B.p.push(p[0], p[1], p[2]);
     B.c.push(col[0] * s, col[1] * s, col[2] * s);
+    B.k.push(KIND);
   }
 }
 const HEX_FACES = [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7], [3, 2, 1, 0], [4, 5, 6, 7]];
@@ -449,7 +454,7 @@ const toneOf = (v, y) => 0.95 + hash(v, y, 1, 1) * 0.08;
 
 // connected roofs are split into small regions that share one roof colour,
 // so a row of houses reads as a few buildings instead of a patchwork
-const ROOF_TONES = ['#b5563f', '#c0654a', '#a94f45', '#8e4b55', '#4f5d66', '#3d5878', '#3f6b66', '#5b4a7a', '#8a4a2f', '#b5563f', '#c0654a', '#4f5d66'];
+const ROOF_TONES = ['#dcaa63', '#e3b672', '#cf914e', '#d8723f', '#c95f3c', '#b9533b', '#e3824a', '#a94f45', '#d9a35f', '#c4683f'];
 let roofCache = new Map();
 function computeRoofRegions() {
   roofCache = new Map();
@@ -564,7 +569,7 @@ function emitCellLevel(ci, y) {
     setTarget(key);
     const n = outward(Mp[k], C, Qc[own]), col = lin(blocks.get(key).c, toneOf(v, y) * 0.9);
     const mid = l2(Mp[k], C, 0.5);
-    face('main', [P3(Mp[k], y - 0.06), P3(C, y - 0.06), P3(C, y + ARCH), P3(Mp[k], y + ARCH)], col, [mid[0] - n[0], y + 0.3, mid[1] - n[1]]);
+    KIND = 1; face('main', [P3(Mp[k], y - 0.06), P3(C, y - 0.06), P3(C, y + ARCH), P3(Mp[k], y + ARCH)], col, [mid[0] - n[0], y + 0.3, mid[1] - n[1]]); KIND = 0;
   }
 }
 
@@ -579,7 +584,7 @@ function emitWall(cell, y, s, v, b, supported, vv) {
     if (isGable(v, y, other)) {
       // the wall rises into a gable under the verge, with a small attic window at the joint
       const Hr = y + 1 + RISE;
-      face('main', [P3(s.a, y + 1), P3(s.b, y + 1), P3(s.a, Hr - 0.01)], col, ref(mid));
+      KIND = 1; face('main', [P3(s.a, y + 1), P3(s.b, y + 1), P3(s.a, Hr - 0.01)], col, ref(mid)); KIND = 0;
       if (L > 0.22) {
         const lo = Math.min(v, other), hi = Math.max(v, other), lit = hash(lo, hi, y, 24) < 0.5 ? 'lit' : 'dark';
         wb(F, 0, 0.075, 0, 0.025, y + 1.06, y + 1.3, lin(C.trim));
@@ -590,7 +595,7 @@ function emitWall(cell, y, s, v, b, supported, vv) {
   if (supported) {
     const street = onStreet(v, y);
     const y0 = street ? y : y - 0.06, sb = street ? 0.8 : 1;
-    face('main', [P3(s.a, y0), P3(s.b, y0), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [sb, sb, 1, 1]);
+    KIND = 1; face('main', [P3(s.a, y0), P3(s.b, y0), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [sb, sb, 1, 1]); KIND = 0;
     if (street) wb(F, 0, L, -0.02, 0.022, y, y + 0.1, lin(shade(b.c, 0.82)));
     // a slim band marks each storey, a two-step cornice sits under every eave
     if (!street && y >= 2) wb(F, 0, L, -0.02, 0.016, y - 0.005, y + 0.035, lin(shade(b.c, 0.88)));
@@ -605,22 +610,22 @@ function emitWall(cell, y, s, v, b, supported, vv) {
   // nothing directly below: the corners become piers that reach down to whatever is there
   const base = supportBase(v, y), overWater = base < GROUND;
   const footing = (s0, s1) => {
-    wb(F, s0, s1, -0.17, 0.05, WATER - 0.4, WATER + 0.14, lin(C.stone));
+    KIND = 3; wb(F, s0, s1, -0.17, 0.05, WATER - 0.4, WATER + 0.14, lin(C.stone)); KIND = 0;
     wb(F, s0, s1, -0.19, 0.07, WATER + 0.14, WATER + 0.2, lin(C.stoneLip));
   };
   if (s.curve) {
-    face('main', [P3(s.a, base), P3(s.b, base), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [0.7, 0.7, 1, 1]);
+    KIND = 1; face('main', [P3(s.a, base), P3(s.b, base), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [0.7, 0.7, 1, 1]); KIND = 0;
     if (overWater) footing(0, L);
     return;
   }
   const pier0 = 0.8 * L;
   if (base < y) {
-    wb(F, pier0, L, -0.12, 0, base, y + 0.02, col);
+    KIND = 1; wb(F, pier0, L, -0.12, 0, base, y + 0.02, col); KIND = 0;
     wb(F, pier0 - 0.015, L, -0.13, 0.015, y - 0.06, y + 0.01, lin(C.trim));
     if (overWater) footing(pier0 - 0.02, L);
     else wb(F, pier0 - 0.02, L, -0.14, 0.02, base, base + 0.08, lin(shade(b.c, 0.8)));
   }
-  face('main', [P3(s.a, y + ARCH), P3(s.b, y + ARCH), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid));
+  KIND = 1; face('main', [P3(s.a, y + ARCH), P3(s.b, y + ARCH), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid)); KIND = 0;
   // smooth arch: the crown sits at the joint, so two neighbouring halves make one arch
   const P = (sx, d, yy) => [F.a[0] + F.t[0] * sx + F.n[0] * d, yy, F.a[1] + F.t[1] * sx + F.n[1] * d];
   const open = x => x < 0.8 ? 0.58 * Math.sqrt(Math.max(0, 1 - (x / 0.8) ** 2)) : 0;
@@ -631,7 +636,7 @@ function emitWall(cell, y, s, v, b, supported, vv) {
     for (let i = 0; i < n; i++) {
       const x0 = i / n, x1 = (i + 1) / n, s0 = x0 * L, s1 = x1 * L;
       const y0 = Y + open(x0), y1 = Y + open(x1);
-      face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, 0, top), P(s0, 0, top)], col, [inRef[0], Y + 0.3, inRef[2]]);
+      KIND = 1; face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, 0, top), P(s0, 0, top)], col, [inRef[0], Y + 0.3, inRef[2]]); KIND = 0;
       face('main', [P(s0, 0, y0), P(s1, 0, y1), P(s1, -depth, y1), P(s0, -depth, y0)], inner, [(F.a[0] + F.t[0] * s0), Y + 3, (F.a[1] + F.t[1] * s0)]);
       face('main', [P(s0, -depth, y0), P(s1, -depth, y1), P(s1, -depth, top), P(s0, -depth, top)], inner, [s.a[0] + s.n[0], Y + 0.3, s.a[1] + s.n[1]]);
     }
@@ -641,7 +646,7 @@ function emitWall(cell, y, s, v, b, supported, vv) {
   // a taller gap gets an arch at every storey, tied by a beam, like an aqueduct
   for (let k = Math.max(1, Math.ceil(base - 0.01)); k < y; k++) {
     arch(k);
-    wb(F, 0, L, -depth, 0, k + ARCH, k + ARCH + 0.08, col);
+    KIND = 1; wb(F, 0, L, -depth, 0, k + ARCH, k + ARCH + 0.08, col); KIND = 0;
     wb(F, 0, L, -depth - 0.005, 0.012, k + ARCH + 0.08, k + ARCH + 0.1, lin(C.trim));
   }
 }
@@ -712,11 +717,12 @@ function emitFacade(y, s, F, v, b, vv, cell) {
       }
     }
   };
-  const jointWindow = (half, y0 = 0.33, y1 = 0.8) => {
-    wb(F, 0, half + 0.04, 0, 0.025, y + y0, y + y1, trim);
-    wb(F, 0, half, 0, 0.034, y + y0 + 0.04, y + y1 - 0.04, gcol, lit);
-    wb(F, 0, 0.012, 0, 0.042, y + y0 + 0.04, y + y1 - 0.04, trim);
-    if (y1 - y0 > 0.3) head(half + 0.04, y + y1);
+  const jointWindow = (half, y0 = 0.4, y1 = 0.74) => {
+    wb(F, 0, half + 0.035, 0, 0.025, y + y0, y + y1, trim);
+    wb(F, 0, half, 0, 0.034, y + y0 + 0.035, y + y1 - 0.035, gcol, lit);
+    wb(F, 0, 0.011, 0, 0.042, y + y0 + 0.035, y + y1 - 0.035, trim);
+    if (y1 - y0 < 0.6) wb(F, 0, half, 0, 0.042, y + (y0 + y1) / 2 - 0.008, y + (y0 + y1) / 2 + 0.008, trim);
+    if (y1 - y0 > 0.3) head(half + 0.035, y + y1);
   };
   if (onStreet(v, y) && h < 0.28 && L > 0.3) {
     // shopfront with a striped awning
@@ -729,11 +735,11 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     return;
   }
   if (h < 0.5) {
-    jointWindow(0.11);
-    sill(0, 0.17);
+    jointWindow(0.085);
+    sill(0, 0.14);
     if (h2 < 0.45 && L > 0.3) {
       const sh = lin(SHUTTERS[Math.floor(hash(v, 0, 28, 1) * SHUTTERS.length)]);
-      wb(F, 0.155, 0.255, 0, 0.04, y + 0.36, y + 0.77, sh);
+      wb(F, 0.125, 0.205, 0, 0.04, y + 0.42, y + 0.73, sh);
     } else if (h2 > 0.7) {
       wb(F, 0, 0.16, 0, 0.1, y + 0.35, y + 0.42, lin(C.leaf));
       for (const sx of [0.04, 0.11]) wb(F, sx, sx + 0.035, 0.05, 0.085, y + 0.42, y + 0.46, lin(h2 > 0.85 ? '#f2a7b5' : '#fbe7a1'));
@@ -742,13 +748,14 @@ function emitFacade(y, s, F, v, b, vv, cell) {
   }
   if (h < 0.74 && L > 0.34) {
     const sc = L * 0.55;
-    wb(F, sc - 0.12, sc + 0.12, 0, 0.025, y + 0.35, y + 0.8, trim);
-    wb(F, sc - 0.08, sc + 0.08, 0, 0.034, y + 0.39, y + 0.76, gcol, lit);
-    wb(F, sc - 0.006, sc + 0.006, 0, 0.042, y + 0.39, y + 0.76, trim);
-    sill(sc - 0.15, sc + 0.15);
+    wb(F, sc - 0.1, sc + 0.1, 0, 0.025, y + 0.4, y + 0.75, trim);
+    wb(F, sc - 0.065, sc + 0.065, 0, 0.034, y + 0.435, y + 0.715, gcol, lit);
+    wb(F, sc - 0.006, sc + 0.006, 0, 0.042, y + 0.435, y + 0.715, trim);
+    wb(F, sc - 0.065, sc + 0.065, 0, 0.042, y + 0.567, y + 0.583, trim);
+    sill(sc - 0.12, sc + 0.12);
     return;
   }
-  if (h < 0.88 && y >= 2) {
+  if (h < 0.88 && y >= 2 && !has(other, y - 1) && !has(other, y)) {
     // french window with a balcony
     jointWindow(0.1, 0.03, 0.82);
     wslab(F, 0, 0.3, 0, y + 0.02, 0.22, y + 0.02, 0.035, trim);
@@ -838,18 +845,7 @@ function emitRoof(ci, q, y, v, b, R, Vq) {
   const cone = R.some(r => r.cv);
   for (let i = 0; i < R.length - 1; i++) {
     const a = pt(R[i]), c = pt(R[i + 1]);
-    face('main', [apex, a, c], roof, below, [1.07, 0.93, 0.93]);
-    // tile courses run parallel to the eave edge of each facet
-    const eA = R[i].e && !R[i].g, eC = R[i + 1].e && !R[i + 1].g;
-    if (eA || eC) {
-      const n = upNormal(apex, a, c);
-      const line = eA && eC ? t => [lerp3(a, apex, t), lerp3(c, apex, t)]
-        : eA ? t => [lerp3(a, apex, t), lerp3(a, c, t)] : t => [lerp3(c, apex, t), lerp3(c, a, t)];
-      for (const t of [0.16, 0.33, 0.5, 0.67, 0.84]) {
-        const [p0, q0] = line(t), [p1, q1] = line(t + 0.045);
-        face('main', [lift(p0, n), lift(q0, n), lift(q1, n), lift(p1, n)], course, below);
-      }
-    }
+    KIND = 2; face('main', [apex, a, c], roof, below, [1.07, 0.93, 0.93]); KIND = 0;
     if (R[i].e && R[i + 1].e) {
       const ao = [a[0], a[1] - RT, a[2]], co = [c[0], c[1] - RT, c[2]];
       const wallY = r => r.g ? Hr - RT - 0.02 : y + 1;
@@ -913,7 +909,7 @@ function emitGroundCell(ci) {
     if (e) { const fil = f[k] ? k : nx4(k), emp = f[k] ? nx4(k) : k; off = norm2(sub2(Vp[emp], Vp[fil])); }
     return { p: Mp[k], e, off };
   };
-  const grout = lin('#a99f8f'), stone = lin(C.stone), curb = lin(C.stoneLip);
+  const grout = lin('#a99f8f'), stone = lin(C.stone), curb = lin('#b04f3e');
   for (let q = 0; q < 4; q++) {
     if (!f[q]) continue;
     const v = vv[q], key = keyOf(v, 0), Vq = Vp[q];
@@ -935,14 +931,18 @@ function emitGroundCell(ci) {
       pickTri(P3(Vq, GROUND), P3(a, GROUND), P3(c, GROUND), { v, y: 0, t: 'top' });
       if (R[i].e && R[i + 1].e) {
         // quay wall with a light kerb, foam where it meets the water
-        face('main', [P3(a, GROUND), P3(c, GROUND), P3(c, 0.1), P3(a, 0.1)], stone, P3(Vq, 0.5), [1, 1, 0.62, 0.62]);
-        const ak = pt(R[i], EDGE + 0.025), ck = pt(R[i + 1], EDGE + 0.025);
-        hexa('main', [P3(R[i].p, GROUND - 0.06), P3(R[i + 1].p, GROUND - 0.06), P3(ck, GROUND - 0.06), P3(ak, GROUND - 0.06),
-                      P3(R[i].p, GROUND + 0.025), P3(R[i + 1].p, GROUND + 0.025), P3(ck, GROUND + 0.025), P3(ak, GROUND + 0.025)], curb);
-        const fa = pt(R[i], EDGE + 0.32), fc = pt(R[i + 1], EDGE + 0.32);
-        face('foam', [P3(a, WATER + 0.12), P3(c, WATER + 0.12), P3(fc, WATER + 0.12), P3(fa, WATER + 0.12)], lin(C.foam), P3(Vq, -2));
+        KIND = 3; face('main', [P3(a, GROUND), P3(c, GROUND), P3(c, 0.1), P3(a, 0.1)], stone, P3(Vq, 0.5), [1, 1, 0.62, 0.62]); KIND = 0;
+        const ak = pt(R[i], EDGE + 0.045), ck = pt(R[i + 1], EDGE + 0.045), ai = pt(R[i], EDGE - 0.06), ci2 = pt(R[i + 1], EDGE - 0.06);
+        hexa('main', [P3(ai, GROUND - 0.12), P3(ci2, GROUND - 0.12), P3(ck, GROUND - 0.12), P3(ak, GROUND - 0.12),
+                      P3(ai, GROUND + 0.045), P3(ci2, GROUND + 0.045), P3(ck, GROUND + 0.045), P3(ak, GROUND + 0.045)], curb, [0.8, 0.8, 0.8, 0.8, 1, 1, 1, 1]);
+        const f0a = pt(R[i], EDGE + 0.05), f0c = pt(R[i + 1], EDGE + 0.05), fa = pt(R[i], EDGE + 0.2), fc = pt(R[i + 1], EDGE + 0.2);
+        face('foam', [P3(f0a, WATER + 0.012), P3(f0c, WATER + 0.012), P3(fc, WATER + 0.012), P3(fa, WATER + 0.012)], lin(C.foam), P3(Vq, -2));
+        const sa = pt(R[i], EDGE + 1.0), sc = pt(R[i + 1], EDGE + 1.0);
+        face('main', [P3(a, WATER - 0.14), P3(c, WATER - 0.14), P3(sc, WATER - 0.85), P3(sa, WATER - 0.85)], lin('#d9c69c'), P3(Vq, WATER - 3));
         pickQuad(P3(a, WATER), P3(c, WATER), P3(c, GROUND), P3(a, GROUND), { v, y: 0, t: 'side', cands: [vv[nx4(q)], vv[pv4(q)]] });
-        if (i === 0 && !R[1].cv && !has(v, 1) && hash(v, ci, q, 8) < 0.3) waterStairs(a, c, Vq);
+        const stairs = i === 0 && !R[1].cv && !has(v, 1) && hash(v, ci, q, 8) < 0.3;
+        if (stairs) waterStairs(a, c, Vq);
+        else if (!has(v, 1)) railing(pt(R[i], EDGE - 0.02), pt(R[i + 1], EDGE - 0.02), GROUND + 0.045);
       }
     }
     if (has(v, 1) || isCourtyard(v)) continue;
@@ -968,6 +968,22 @@ function emitGroundCell(ci) {
       boxAt(p[0], p[1], 0.032, GROUND + 0.5, GROUND + 0.58, lin(C.lamp), 'lit');
       boxAt(p[0], p[1], 0.042, GROUND + 0.58, GROUND + 0.6, iron);
     }
+  }
+}
+// a thin iron railing: posts at even spacing and two rails, joined across cells by shared endpoints
+const IRON = lin('#2f3338');
+function railing(a, c, base) {
+  const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+  if (L < 0.02) return;
+  const t = [(c[0] - a[0]) / L, (c[1] - a[1]) / L], n = [-t[1] * 0.006, t[0] * 0.006];
+  const bar = (p, q, y0, y1) => hexa('main', [[p[0] - n[0], y0, p[1] - n[1]], [q[0] - n[0], y0, q[1] - n[1]], [q[0] + n[0], y0, q[1] + n[1]], [p[0] + n[0], y0, p[1] + n[1]],
+                                               [p[0] - n[0], y1, p[1] - n[1]], [q[0] - n[0], y1, q[1] - n[1]], [q[0] + n[0], y1, q[1] + n[1]], [p[0] + n[0], y1, p[1] + n[1]]], IRON);
+  bar(a, c, base + 0.25, base + 0.27);
+  bar(a, c, base + 0.13, base + 0.142);
+  const k = Math.max(1, Math.round(L / 0.16));
+  for (let j = 0; j < k; j++) {
+    const p = l2(a, c, j / k);
+    boxAt(p[0], p[1], 0.008, base, base + 0.27, IRON);
   }
 }
 // stone steps running down the face of the quay into the harbour, with a mooring bollard
@@ -1018,9 +1034,11 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.98;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog('#e6f2ef', 60, 170);
+scene.fog = new THREE.Fog('#86b1b8', 45, 150);
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 800);
 camera.position.set(24, 24, 30);
@@ -1052,12 +1070,39 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), new THREE.Shad
 }));
 scene.add(sky);
 
-const waterGeo = new THREE.PlaneGeometry(400, 400, 130, 130).rotateX(-Math.PI / 2);
-const waterBase = waterGeo.attributes.position.array.slice();
-const waterMat = new THREE.MeshStandardMaterial({ color: '#7fc1cf', roughness: 0.28, metalness: 0.08, flatShading: true });
-const water = new THREE.Mesh(waterGeo, waterMat);
+// clear water: a soft, rippled reflection over a sea floor and sandy shelves you can see through it
+const seaFloor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#3d7b86', roughness: 1 }));
+seaFloor.position.y = WATER - 0.9;
+seaFloor.receiveShadow = true;
+scene.add(seaFloor);
+const WaterShader = {
+  name: 'HarbourWater',
+  uniforms: {
+    color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null },
+    uTime: { value: 0 }, uWater: { value: new THREE.Color('#5d9ca6') }, uAlpha: { value: 0.86 }, uRefl: { value: 0.2 },
+    uFog: { value: new THREE.Color('#9fc6ca') }, uFogNear: { value: 45 }, uFogFar: { value: 150 },
+  },
+  vertexShader: `uniform mat4 textureMatrix; varying vec4 vUv; varying vec3 vWP;
+void main() { vUv = textureMatrix * vec4(position, 1.0); vec4 wp = modelMatrix * vec4(position, 1.0); vWP = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }`,
+  fragmentShader: `uniform sampler2D tDiffuse; uniform vec3 uWater; uniform vec3 uFog; uniform float uTime; uniform float uAlpha; uniform float uRefl; uniform float uFogNear; uniform float uFogFar;
+varying vec4 vUv; varying vec3 vWP;
+void main() {
+  vec2 d = vec2(sin(vWP.x * 1.6 + uTime * 1.1) + sin(vWP.z * 2.2 - uTime * 0.8), cos(vWP.z * 1.8 + uTime * 0.9) + sin(vWP.x * 1.2 - uTime * 0.7)) * 0.006;
+  vec4 uv = vUv; uv.xy += d * uv.w;
+  vec3 col = mix(uWater, texture2DProj(tDiffuse, uv).rgb, uRefl);
+  float f = smoothstep(uFogNear, uFogFar, distance(cameraPosition, vWP));
+  gl_FragColor = vec4(mix(col, uFog, f), mix(uAlpha, 1.0, f));
+}`,
+};
+const water = new Reflector(new THREE.PlaneGeometry(400, 400), { shader: WaterShader, textureWidth: 1024, textureHeight: 1024, clipBias: 0.003 });
+water.rotation.x = -Math.PI / 2;
 water.position.y = WATER;
-water.receiveShadow = true;
+water.material.transparent = true;
+water.material.depthWrite = false;
+water.renderOrder = 1;
+// the AO pass renders the scene with an override material; the reflection must not re-render then
+const renderReflection = water.onBeforeRender;
+water.onBeforeRender = function (r, sc, cam) { if (!sc.overrideMaterial) renderReflection.call(this, r, sc, cam); };
 scene.add(water);
 
 // grid lines that brighten around the cursor
@@ -1075,10 +1120,54 @@ scene.add(new THREE.LineSegments(gridGeo, gridMat));
 
 // materials for the baked town
 const mainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
+// painted materials: brick, tile and stone patterns are drawn from world position, each unit with
+// its own slight shift in tone and hue so surfaces look hand-made rather than flat
+mainMat.onBeforeCompile = sh => {
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float kind;\nvarying float vKind;\nvarying vec3 vWP;\nvarying vec3 vWN;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvKind = kind;\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', `#include <common>
+varying float vKind;
+varying vec3 vWP;
+varying vec3 vWN;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+vec3 paint(vec3 base) {
+  if (vKind < 0.5) return base;
+  vec3 n = normalize(vWN);
+  vec2 sz; vec2 q;
+  if (vKind < 1.5) { sz = vec2(0.23, 0.105); q = vec2(vWP.x * n.z - vWP.z * n.x, vWP.y); }
+  else if (vKind < 2.5) {
+    vec3 hz = normalize(vec3(n.z, 0.0, -n.x) + vec3(1e-4, 0.0, 0.0));
+    sz = vec2(0.15, 0.07); q = vec2(dot(vWP, hz), vWP.y);
+  } else { sz = vec2(0.34, 0.15); q = vec2(vWP.x * n.z - vWP.z * n.x, vWP.y); }
+  float row = floor(q.y / sz.y);
+  float u = q.x / sz.x + 0.5 * mod(row, 2.0) + 0.17 * h21(vec2(row, vKind));
+  vec2 id = vec2(floor(u), row);
+  vec2 fr = vec2(fract(u), fract(q.y / sz.y));
+  float r = h21(id + vKind * 17.0);
+  vec3 tint = vec3(h21(id + 3.1), h21(id + 5.7), h21(id + 9.3)) - 0.5;
+  float spread = vKind < 1.5 ? 0.26 : vKind < 2.5 ? 0.26 : 0.3;
+  vec3 c = base * (1.0 - spread * 0.5 + spread * r) * (1.0 + 0.07 * tint);
+  float edge = min(min(fr.x, 1.0 - fr.x) * sz.x, min(fr.y, 1.0 - fr.y) * sz.y);
+  if (vKind > 1.5 && vKind < 2.5) {
+    // tiles: a shadowed lower lip on every course and a fine gap between tiles
+    c *= mix(0.74, 1.0, smoothstep(0.0, 0.3, fr.y));
+    c *= mix(0.86, 1.0, smoothstep(0.002, 0.006, min(fr.x, 1.0 - fr.x) * sz.x));
+  } else {
+    c *= mix(0.9, 1.0, smoothstep(0.002, 0.006, edge));
+  }
+  // a little extra saturation keeps the pastels lively under filmic tone mapping
+  float l = dot(c, vec3(0.299, 0.587, 0.114));
+  return mix(vec3(l), c, 1.18);
+}`)
+    .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = paint(diffuseColor.rgb);');
+};
 const litMat = new THREE.MeshStandardMaterial({ vertexColors: true, color: '#41546b', roughness: 0.4, emissive: '#ffb04a', emissiveIntensity: 0 });
 const darkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35 });
 const foamMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false });
 const MATS = { main: mainMat, lit: litMat, dark: darkMat, foam: foamMat };
+
 const treeGeo = new THREE.IcosahedronGeometry(1, 1);
 const treeMat = new THREE.MeshStandardMaterial({ color: C.leaf, roughness: 0.9, flatShading: true });
 
@@ -1090,10 +1179,11 @@ function meshesFrom(m, pivot) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(B.p, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(B.c, 3));
+    geo.setAttribute('kind', new THREE.Float32BufferAttribute(B.k, 1));
     if (pivot) geo.translate(-pivot[0], -pivot[1], -pivot[2]);
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, MATS[name]);
-    if (name !== 'foam') { mesh.castShadow = true; mesh.receiveShadow = true; }
+    if (name !== 'foam') { mesh.castShadow = true; mesh.receiveShadow = true; } else mesh.renderOrder = 2;
     g.add(mesh);
   }
   if (pivot) g.position.set(pivot[0], pivot[1], pivot[2]);
@@ -1221,7 +1311,7 @@ function sampleTown(seed) {
   }
   for (const [v, H] of heightOf) {
     let c = pick();
-    for (let y = 1; y <= H; y++) { if (rnd() < 0.2) c = pick(); m.set(keyOf(v, y), { c }); }
+    for (let y = 1; y <= H; y++) m.set(keyOf(v, y), { c });
   }
   // arcades over a few lanes: an upper floor bridging the street between two houses
   for (const [v, H] of heightOf) {
@@ -1379,7 +1469,9 @@ function setGhost(t, erase) {
   const lg = new THREE.BufferGeometry();
   lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
   ghost.add(new THREE.LineSegments(lg, ghostLineMat));
-  ghostMat.color.set(erase ? '#d4574a' : (colorChoice === 'mixed' ? nextMixed : colorChoice));
+  const under = blocks.get(keyOf(t.v, t.y - 1));
+  const mixedCol = t.y >= 2 && under ? under.c : nextMixed;
+  ghostMat.color.set(erase ? '#d4574a' : (colorChoice === 'mixed' ? mixedCol : colorChoice));
   ghostMat.opacity = erase ? 0.45 : 0.32;
   ghostLineMat.color.set(erase ? '#d4574a' : '#ffffff');
 }
@@ -1397,7 +1489,9 @@ function act(cx, cy, erase) {
     commit(() => blocks.delete(keyOf(t.v, t.y)));
     pluck(t.y, true);
   } else {
-    const c = colorChoice === 'mixed' ? nextMixed : colorChoice;
+    // in Mixed mode a new floor keeps the colour of the floor it stands on, so buildings stay whole
+    const below = blocks.get(keyOf(t.v, t.y - 1));
+    const c = colorChoice !== 'mixed' ? colorChoice : (t.y >= 2 && below ? below.c : nextMixed);
     nextMixed = colorForPlacement();
     anim = { key: keyOf(t.v, t.y), start: performance.now(), obj: null };
     commit(() => blocks.set(anim.key, { c }));
@@ -1437,7 +1531,7 @@ function updateGhost() {
 
 // ---------- M3: time of day ----------
 const TIMES = {
-  Day:   { top: '#9fd0e6', horizon: '#e6f2ef', sun: '#fff1db', sunI: 2.4, sunPos: [14, 22, 9],  hs: '#fdf6ec', hg: '#7fb2bf', hI: 1.5, water: '#7fc1cf', glow: 0,   glass: '#41546b', bloom: 0.0, foam: 0.55, foamCol: '#ffffff' },
+  Day:   { top: '#6f9fa9', horizon: '#86b1b8', sun: '#ffe4c0', sunI: 3.1, sunPos: [14, 22, 9],  hs: '#fff1df', hg: '#4f838d', hI: 1.6, water: '#478893', glow: 0,   glass: '#41546b', bloom: 0.0, foam: 0.55, foamCol: '#ffffff' },
   Dusk:  { top: '#6d78b3', horizon: '#f7c59f', sun: '#ffad73', sunI: 1.9, sunPos: [26, 8, -6],  hs: '#f6cbb2', hg: '#56698a', hI: 1.0, water: '#86a3cc', glow: 0.9, glass: '#ffcf8a', bloom: 0.35, foam: 0.5, foamCol: '#ffe6d6' },
   Night: { top: '#0b1430', horizon: '#2a3c66', sun: '#a9c1ff', sunI: 1.0, sunPos: [-12, 20, 10], hs: '#6074a8', hg: '#1a2647', hI: 1.0, water: '#1f3659', glow: 1.7, glass: '#ffd38f', bloom: 0.55, foam: 0.35, foamCol: '#7f90b8' },
 };
@@ -1467,7 +1561,8 @@ function applyTime() {
   scene.fog.color.copy(cur.horizon);
   sun.color.copy(cur.sun); sun.intensity = cur.sunI; sun.position.copy(cur.sunPos);
   hemi.color.copy(cur.hs); hemi.groundColor.copy(cur.hg); hemi.intensity = cur.hI;
-  waterMat.color.copy(cur.water);
+  water.material.uniforms.uWater.value.copy(cur.water);
+  water.material.uniforms.uFog.value.copy(cur.horizon);
   foamMat.color.copy(cur.foamCol);
   litMat.color.copy(cur.glass); litMat.emissiveIntensity = cur.glow;
   bloom.strength = cur.bloom;
@@ -1548,6 +1643,42 @@ if (!lowPower) {
   composer.addPass(gtao);
 }
 window.harbourAO = on => { if (gtao) gtao.enabled = on; };
+// ink: screen-space outlines from the AO pass's depth and normal buffers, so the cost does not grow
+// with the town. Lines appear where depth jumps (silhouettes) or the surface turns (creases).
+let ink = null;
+if (gtao) {
+  ink = new ShaderPass({
+    uniforms: {
+      tDiffuse: { value: null }, tNormal: { value: gtao.normalTexture }, tDepth: { value: gtao.depthTexture },
+      resolution: { value: new THREE.Vector2(1, 1) }, cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
+      inkColor: { value: new THREE.Color('#2a2430') }, strength: { value: 0.62 },
+    },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `#include <packing>
+uniform sampler2D tDiffuse; uniform sampler2D tNormal; uniform sampler2D tDepth;
+uniform vec2 resolution; uniform float cameraNear; uniform float cameraFar; uniform vec3 inkColor; uniform float strength;
+varying vec2 vUv;
+float viewDepth(vec2 uv) { return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar); }
+void main() {
+  vec4 c = texture2D(tDiffuse, vUv);
+  vec2 px = 1.0 / resolution;
+  float d0 = viewDepth(vUv);
+  vec3 n0 = texture2D(tNormal, vUv).xyz * 2.0 - 1.0;
+  float e = 0.0;
+  vec2 offs[4]; offs[0] = vec2(px.x, 0.0); offs[1] = vec2(-px.x, 0.0); offs[2] = vec2(0.0, px.y); offs[3] = vec2(0.0, -px.y);
+  for (int i = 0; i < 4; i++) {
+    float d = viewDepth(vUv + offs[i]);
+    vec3 n = texture2D(tNormal, vUv + offs[i]).xyz * 2.0 - 1.0;
+    e = max(e, smoothstep(0.03, 0.09, (d - d0) / d0));
+    e = max(e, smoothstep(0.22, 0.45, 1.0 - dot(n, n0)));
+  }
+  float fade = 1.0 - smoothstep(35.0, 110.0, d0);
+  c.rgb = mix(c.rgb, inkColor, e * strength * fade);
+  gl_FragColor = c;
+}`,
+  });
+  composer.addPass(ink);
+}
 const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0, 0.45, 0.88);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -1557,6 +1688,7 @@ function resize() {
   renderer.setSize(w, h, false);
   composer.setPixelRatio(renderer.getPixelRatio());
   composer.setSize(w, h);
+  if (ink) ink.uniforms.resolution.value.set(w * renderer.getPixelRatio(), h * renderer.getPixelRatio());
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -1567,7 +1699,6 @@ resize();
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const easeOutBack = t => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
 const smooth = t => t * t * (3 - 2 * t);
-const wpos = waterGeo.attributes.position;
 let frame = 0;
 
 function tick(now) {
@@ -1580,15 +1711,7 @@ function tick(now) {
     if (p >= 1) timeTo = null;
   }
   applyTime();
-  if (!reduceMotion && (frame++ & 1) === 0) {
-    const a = wpos.array;
-    for (let i = 0; i < a.length; i += 3) {
-      const x = waterBase[i], z = waterBase[i + 2];
-      a[i + 1] = Math.sin(x * 0.5 + t * 0.9) * 0.04 + Math.cos(z * 0.42 + t * 0.7) * 0.04 + Math.sin((x + z) * 1.3 + t * 1.6) * 0.012;
-    }
-    wpos.needsUpdate = true;
-    waterGeo.computeVertexNormals();
-  }
+  if (!reduceMotion) water.material.uniforms.uTime.value = t;
   foamMat.opacity = cur.foam + Math.sin(t * 1.4) * 0.12;
   for (const bt of boats) {
     const ang = bt.phase + t * bt.speed;

@@ -59,6 +59,19 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       the piers carry an arch at every storey (aqueduct); open quays get stone steps down into the water.
 - [x] **M12 Soft ambient occlusion** — screen-space GTAO so creases (roof meets wall, wall meets street,
       under eaves and arches) darken softly, the way Townscaper's renders do.
+
+### Visual parity round (reference: two Townscaper screenshots; goal is the hand-made, Ghibli-like warmth)
+
+- [x] **P1 Painted materials** — walls read as brick, roofs as tiles, quays as cut stone, each brick or
+      tile slightly different in tone, drawn in the shader from world position (no image files).
+- [x] **P2 Ink outlines** — thin dark lines on silhouettes and creases, like the reference's inked look.
+- [x] **P3 Clear water** — semi-transparent water with soft reflections, a sandy shelf around the quays
+      seen through it, a darker sea floor, and foam that hugs the shore.
+- [x] **P4 Light and grade** — filmic tone mapping, warm key and teal fill, teal haze; roofs from a
+      sand-and-terracotta family; each building keeps one colour as it grows.
+- [x] **P5 Quay character** — red brick coping on quay edges, iron railings on open edges,
+      small cross-barred windows that make buildings feel larger.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
@@ -76,5 +89,6 @@ Open `index.html` through any static server, for example:
     python3 -m http.server 8000
 
 then visit http://localhost:8000. In the browser console, `harbourView(x, y, z, tx, ty, tz)`
-moves the camera, and `harbourAO(false)` turns ambient occlusion off for comparison. (The file is written without `<!doctype>`/`<head>` because it is
+moves the camera, and `harbourAO(false)` turns ambient occlusion off for comparison
+(the ink outlines reuse the occlusion pass's buffers, so they are desktop-only too). (The file is written without `<!doctype>`/`<head>` because it is
 also published as a claude.ai artifact; browsers render it fine.)
