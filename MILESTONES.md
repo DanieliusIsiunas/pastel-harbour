@@ -1,6 +1,6 @@
 # Pastel Harbour — milestones
 
-Goal: a Townscaper-like town toy with comparable polish, running in the browser (Three.js, one HTML file).
+Goal: a Townscaper-like town toy with comparable polish, running in the browser (Three.js; ES modules built into one HTML file).
 
 ## What makes Townscaper feel the way it does (research notes)
 
@@ -148,14 +148,15 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
 
 ## Running locally
 
-Open `index.html` through any static server, for example:
+    npm install
+    npm run dev        # http://localhost:5173 with hot reload
+    npm run build      # dist/index.html and dist/artifact.html (one self-contained file)
 
-    python3 -m http.server 8000
-
-then visit http://localhost:8000. In the browser console, `harbourView(x, y, z, tx, ty, tz)`
-moves the camera, and `harbourAO(false)` turns ambient occlusion off for comparison
-(the ink outlines reuse the occlusion pass's buffers, so they are desktop-only too).
+Code layout and the feature registry are described in ARCHITECTURE.md. In the browser console,
+`harbourView(x, y, z, tx, ty, tz)` moves the camera, and `harbourAO(false)` turns ambient occlusion
+off for comparison (the ink outlines reuse the occlusion pass's buffers, so they are desktop-only too).
 `harbourStats()` reports blocks, houses, doors and how many pieces are still rippling.
 `harbourDev` builds precise test scenes (`build([[vertex, level, colour]])`, `clear()`, `vertexAt(x, z)`,
-`neighbors(v)`), toggles `bricks(on)` / `rooms(on)` and reports `count()` of triangles and bricks. (The file is written without `<!doctype>`/`<head>` because it is
-also published as a claude.ai artifact; browsers render it fine.)
+`neighbors(v)`, `sample(seed)`), toggles `bricks(on)` / `rooms(on)`, reports `count()` of triangles and
+bricks, `plan()` and `why(vertex)` for the planner, and `digest()`, the geometry fingerprint the
+fixtures in `fixtures/` are checked against.
