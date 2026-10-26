@@ -58,7 +58,9 @@ export function planScene() {
       }
     };
     for (const rule of R.side) apply(rule, PLAN.side);
-    for (const rule of R.overlay) apply(rule, PLAN.over);
+    // the foot of a wall that a door, staircase or shopfront already uses stays clear: no ivy, woodpile or
+    // barrels in front of an entrance
+    for (const rule of R.overlay) apply({ ...rule, needs: (v, n) => !PLAN.side.has(sideKey(v, n, 1)) && (!rule.needs || rule.needs(v, n)) }, PLAN.over);
   }
   // open ground. The walking network comes first (doors and stairs are known by now), then quay edges,
   // then tiles, so a tile prop can keep clear of a water stair or a bench on its edge

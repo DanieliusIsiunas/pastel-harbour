@@ -102,6 +102,7 @@ resize();
 
 export function renderFrame(sunIntensity) {
   if (ink) {
+    ink.uniforms.cameraNear.value = camera.near; ink.uniforms.cameraFar.value = camera.far;
     ink.uniforms.proj.value.copy(camera.projectionMatrix);
     ink.uniforms.projInv.value.copy(camera.projectionMatrixInverse);
     ink.uniforms.lightView.value.copy(sun.position).sub(sun.target.position).normalize().transformDirection(camera.matrixWorldInverse);

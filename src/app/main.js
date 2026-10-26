@@ -8,7 +8,7 @@ import { updateFx } from '../fx/particles.js';
 import { foamMat } from '../render/materials.js';
 import { renderFrame } from '../render/post.js';
 import { animateWater, consumeShadows, controls, renderer, sun } from '../render/stage.js';
-import { directCamera } from '../render/director.js';
+import { directCamera, fitClipPlanes } from '../render/director.js';
 import { cur, timeBusy, updateTime } from '../render/time.js';
 import { animateRipple, rebuild, ripple } from '../render/town.js';
 
@@ -31,6 +31,7 @@ function tick(now) {
   busy.anim = ripple.length > 0 || timeBusy();
   controls.update();
   directCamera(dt);
+  fitClipPlanes();
   sun.target.position.set(0, 0, 0);
   if (consumeShadows() || busy.anim) renderer.shadowMap.needsUpdate = true;
   renderFrame(cur.sunI);

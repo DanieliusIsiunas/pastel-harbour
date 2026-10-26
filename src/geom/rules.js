@@ -1,5 +1,5 @@
 import { GROUND, RISE, WATER } from '../core/dims.js';
-import { VERTS, vAdj } from '../core/grid.js';
+import { UVM, VERTS, cells, vAdj, vCells, xz } from '../core/grid.js';
 import { has, keyOf } from '../core/model.js';
 import { hash, norm2, sub2 } from '../core/util.js';
 import { houseOf } from '../plan/houses.js';
@@ -58,6 +58,22 @@ export function roundOf(v, y) {
   if (y >= 2 && isolated(v, y)) return gableOf(v, y).length ? 0.07 : 0.42;
   if (y === 1 && isolated(v, y) && gableOf(v, y).length) return 0.07;
   return [0.07, 0.2, 0.26, 0.36][Math.floor(hash(v, 0, 9, 9) * 4)];
+}
+// A wall side between house corner v and open corner n is drawn by the two cells that share the edge v-n,
+// each from the joint (the edge midpoint) to where its corner starts to round. Windows, doors, dormers and
+// shops centred on the joint are drawn as two halves, so both must agree on what fits: this is the
+// shorter of the two straight lengths, the one both halves use.
+export function jointHalf(v, n, y) {
+  let L = Infinity;
+  for (const [ci, k] of vCells[v]) {
+    const cell = cells[ci], vv = cell.v, e = vv[(k + 1) & 3] === n ? k : vv[(k + 3) & 3] === n ? (k + 3) & 3 : -1;
+    if (e < 0) continue;
+    // corner v is rounded in this cell when its other neighbour in the cell is empty too
+    const w = vv[(k + 1) & 3] === n ? vv[(k + 3) & 3] : vv[(k + 1) & 3], convex = has(v, y) && !has(w, y) && !has(n, y);
+    const M = xz(cell, UVM[e][0], UVM[e][1]), C = cell.c, t = convex ? roundOf(v, y) : 0;
+    L = Math.min(L, Math.hypot(M[0] - (C[0] + (M[0] - C[0]) * t), M[1] - (C[1] + (M[1] - C[1]) * t)));
+  }
+  return L;
 }
 export function apexOf(v, y) {
   const Hr = y + 1 + RISE;

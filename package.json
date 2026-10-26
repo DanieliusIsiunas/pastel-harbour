@@ -11,7 +11,8 @@
     "test": "vitest run",
     "check": "npm run lint && npm run test && npm run build",
     "fixtures:update": "node scripts/fixtures.mjs",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "zfight": "node scripts/zfight.mjs"
   },
   "dependencies": {
     "three": "0.160.0"

@@ -9,6 +9,14 @@ export function makeBuilder(mesh, pick = { P: [], meta: [] }) {
   return { mesh, kind: 0, open: [], pick };
 }
 export const bucket = () => ({ p: [], c: [], k: [], inst: [] });
+// dev only: when on, every triangle records the source line that emitted it (bucket.src), so geometry
+// problems found by inspection tools can be traced to the code that made them
+export const TRACE = { on: false };
+function caller() {
+  const lines = new Error().stack.split('\n');
+  for (const l of lines.slice(2)) if (!l.includes('builder.js') && l.includes('/src/')) return l.replace(/^.*\/src\//, '').replace(/\)$/, '').replace(/:\d+$/, '');
+  return '?';
+}
 // main town surfaces, glass, foam, window cut masks, the rooms behind windows, and instanced bricks
 export const newMesh = () => ({ main: bucket(), lit: bucket(), dark: bucket(), foam: bucket(), mask: bucket(), roomLit: bucket(), roomDark: bucket(), bricks: bucket() });
 
@@ -29,6 +37,7 @@ export function face(bld, bk, pts, col, ref, sh) {
   const n = pts.length;
   if (nx * (cx / n - ref[0]) + ny * (cy / n - ref[1]) + nz * (cz / n - ref[2]) < 0) { pts = pts.slice().reverse(); if (sh) sh = sh.slice().reverse(); }
   const B = bld.mesh[bk], tri = n === 4 ? [0, 1, 2, 0, 2, 3] : [0, 1, 2];
+  if (TRACE.on) { const at = caller(); (B.src || (B.src = [])).push(at); if (n === 4) B.src.push(at); }
   for (const i of tri) {
     const p = pts[i], s = sh ? sh[i] : 1;
     B.p.push(p[0], p[1], p[2]);
@@ -77,7 +86,21 @@ export function brickRows(bld, F, y0, y1, col, open, clip, size = [0.23, 0.1], p
   }
 }
 
+// Runs that wrap around a building (storey bands, cornices, plinths, footings) are drawn per wall segment, so
+// at every corner two of them overlap. Their tops would lie in one plane and z-fight. Each run is lifted by
+// a few tenths of a millimetre that depend on its direction: runs along one straight wall keep exactly the
+// same height and meet without a step, and runs that meet at a corner never share a plane.
+export const lift = F => 0.006 * ((Math.atan2(F.t[1], F.t[0]) / Math.PI + 1) % 1);
+export function band(bld, F, s0, s1, d0, d1, y0, y1, col) { const e = lift(F); wb(bld, F, s0, s1, d0, d1, y0 + e, y1 + e, col); }
+// Details are authored in round numbers, so a door leaf, its frame, a sill and a mullion often share a face
+// plane exactly and z-fight. Every box is therefore grown by one of sixteen hair widths (0 to 3.75 mm), picked
+// from its own position and size: two different boxes almost never land on the same plane, and nothing
+// visibly changes. (Faces that look identical may still tie; that can't be seen.)
+const SKIN = 0.00025;
 export function wb(bld, F, s0, s1, d0, d1, y0, y1, col, bk = 'main') {
+  const e = SKIN * Math.floor(16 * hash(Math.round((F.a[0] + F.t[0] * s0) * 503) ^ Math.round((s1 - s0) * 997), Math.round((F.a[1] + F.t[1] * s0) * 503),
+    Math.round(y0 * 509) ^ Math.round((y1 - y0) * 991), Math.round((d0 + d1) * 1013) + 94));
+  s0 -= e; s1 += e; d0 -= e; d1 += e; y0 -= e; y1 += e;
   const P = (s, d, yy) => [F.a[0] + F.t[0] * s + F.n[0] * d, yy, F.a[1] + F.t[1] * s + F.n[1] * d];
   hexa(bld, bk, [P(s0, d0, y0), P(s1, d0, y0), P(s1, d1, y0), P(s0, d1, y0), P(s0, d0, y1), P(s1, d0, y1), P(s1, d1, y1), P(s0, d1, y1)], col);
 }
@@ -121,6 +144,11 @@ export const ICO = (() => {
 // a faceted leafy blob; with a wall frame it can be flattened against the wall
 export function blob(bld, cx, cy, cz, rx, ry, rz, hex, axes = null) {
   const col = lin(hex);
+  // clumps of the same size side by side would share face planes and flicker; each is sized a little apart
+  const h = hash(Math.round(cx * 211), Math.round(cy * 211), Math.round(cz * 211), 91), k = 1 + 0.03 * h;
+  rx *= k; ry *= k; rz *= k;
+  // and clumps on a wall sit at slightly different depths, for the same reason
+  if (axes) { cx += axes.n[0] * 0.004 * h; cz += axes.n[1] * 0.004 * h; }
   for (const tri of ICO) {
     const pts = tri.map(([x, y, z]) => axes
       ? [cx + axes.t[0] * x * rx + axes.n[0] * z * rz, cy + y * ry, cz + axes.t[1] * x * rx + axes.n[1] * z * rz]

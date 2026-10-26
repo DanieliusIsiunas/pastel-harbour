@@ -33,6 +33,9 @@ describe.each(Object.entries(towns))('%s', (name, scene) => {
       if (['laundry', 'bunting', 'stringLights', 'tieArch'].includes(kind)) expect(spanOf(v), `${kind} on tile ${v}`).toBeTruthy();
     }
   });
+  it('keeps the foot of an entrance wall clear', () => {
+    for (const key of plan.over.keys()) expect(plan.side.has(key), `${plan.over.get(key)} at ${key}`).toBe(false);
+  });
   it('emits finite geometry inside the harbour', () => {
     for (const m of [...town.chunks.values(), ...town.courtyards.values()]) {
       for (const name2 in m) {

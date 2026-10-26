@@ -4,7 +4,7 @@ import globals from 'globals';
 // Lint for bugs, not for taste: unused and undefined names, shadowed imports (a local that hides an
 // import is how a stale import slips through), loose equality, accidental globals.
 export default [
-  { ignores: ['dist/', 'node_modules/'] },
+  { ignores: ['dist/', 'node_modules/', '.claude/'] },
   js.configs.recommended,
   {
     languageOptions: { ecmaVersion: 2022, sourceType: 'module', globals: { ...globals.browser } },

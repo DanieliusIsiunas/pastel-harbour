@@ -215,6 +215,26 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       cell centre) shadowed the palette in the street code, so quay stone and street foam silently took the
       grout colour.
 
+### Polish round: no flicker, no odd forms
+
+- [x] **Z1 Depth precision** — the camera's near plane follows the viewing distance (a tenth of it, at
+      least 0.1) and the far plane sits just past the sky. At the usual distance the depth buffer is about
+      40 times finer, so details a few millimetres off a wall (bricks, window masks, frames) stop flickering.
+- [x] **Z2 No tied faces** — a detector (`npm run zfight`, `src/geom/overlap.js`) finds faces that share a
+      plane, face the same way and look different. In the default town these went from 40,312 pairs (14% of
+      triangles) to 1,224 (0.4%, mostly overlapping ivy leaves). The fixes are systemic: upper walls start
+      at their floor line instead of overlapping the wall below, wrapping runs are lifted by their
+      direction (`band`), every box gets a hair-width skin chosen from its own position and size,
+      glazing bars cross at different depths, railing posts stop under the rail, and leaf clumps vary in
+      size and depth. A test keeps ties under 0.6% of triangles.
+- [x] **F1 Whole forms** — details centred on a joint between two cells are decided from the length both
+      halves share (`jointHalf`), so a dormer, window, door or shopfront is drawn whole or not at all;
+      before, a half whose wall rounded a corner could skip while the other half drew. Exterior stairs
+      need straight wall on both halves of both floors. They are now built masonry: cut-stone steps closed
+      by a sloped stringer wall with a coping and an iron handrail, and the landing on an arch between
+      slim piers instead of a full-height block. Ivy, woodpiles and barrels keep clear of walls that a
+      door, staircase or shopfront uses.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
