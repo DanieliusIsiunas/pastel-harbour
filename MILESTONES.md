@@ -125,6 +125,14 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
 - [x] **L4 Street life** — lamps spaced along quays and plazas, benches on quays facing the water,
       crates of produce outside shops, laundry across lanes between two facing tall houses.
 
+- [x] **L5 House-type vocabularies** — a house's type is read from its whole building mass
+      (cottage, townhouse, tower, warehouse) and each type has its own vocabulary in one table
+      (`STYLES`): door style (plank, panelled with fanlight, arched with iron straps, barn with a Z brace),
+      window proportions and heads, shutters, flower boxes, balconies, gable tendency, dormers,
+      chimneys, roof palette (warm tiles, sand, slate, copper green), planters and ivy. Type-specific
+      rules add warehouse hoists with loading doors, barrels outside warehouses, woodpiles against
+      cottages, and round windows near the tops of towers.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 

@@ -451,7 +451,8 @@ function gableOf(v, y) {
   if (!has(v, y + 1)) {
     const conn = vAdj[v].filter(n => has(n, y)), open = vAdj[v].filter(n => !has(n, y));
     const tower = y >= 2 && has(v, y - 1);
-    if (conn.length === 0 && !tower && open.length >= 2 && hash(v, y, 17, 1) < 0.8) {
+    const gp = styleOf(v).gable;
+    if (conn.length === 0 && !tower && open.length >= 2 && hash(v, y, 17, 1) < gp[0]) {
       // pick the most opposite pair of neighbours as the ridge axis
       let best = -2, pair = null;
       for (let i = 0; i < open.length; i++) for (let j = i + 1; j < open.length; j++) {
@@ -459,7 +460,7 @@ function gableOf(v, y) {
         if (d > best) { best = d; pair = [open[i], open[j]]; }
       }
       if (pair && best > 0.5) out = pair;
-    } else if (conn.length === 1 && hash(v, y, 17, 2) < 0.65) {
+    } else if (conn.length === 1 && hash(v, y, 17, 2) < gp[1]) {
       const back = dirTo(conn[0], v);
       let best = 0.55, u = -1;
       for (const n of open) { const d = dirTo(v, n), dot = d[0] * back[0] + d[1] * back[1]; if (dot > best) { best = dot; u = n; } }
@@ -501,12 +502,25 @@ function computeHouses() {
     if (!cur || y < cur.y) baseCol.set(v, { y, c: blocks.get(k).c });
   }
   const cols = [...baseCol.keys()].sort((a, b) => a - b);
+  // whole building masses (same-colour connected columns) before they are split into house units:
+  // a house's type is read from the mass it belongs to, so every bay of a long low block is a warehouse
+  const massOf = new Map(), massInfo = [];
+  for (const v0 of cols) {
+    if (massOf.has(v0)) continue;
+    const id = massInfo.length, c0 = baseCol.get(v0).c, q = [v0], members = [v0];
+    massOf.set(v0, id);
+    while (q.length) {
+      const v = q.shift();
+      for (const n of vAdj[v]) if (!massOf.has(n) && baseCol.has(n) && baseCol.get(n).c === c0) { massOf.set(n, id); q.push(n); members.push(n); }
+    }
+    massInfo.push({ cols: members.length, height: Math.max(...members.map(topOf)) });
+  }
   for (const v0 of cols) {
     if (houseIdOf.has(v0)) continue;
     const c0 = baseCol.get(v0).c, cap = 2 + Math.floor(hash(v0, 0, 41, 1) * 3);
     const r = k => hash(v0, 0, 41, k);
     const h = {
-      id: houses.length, anchor: v0, cols: [v0],
+      id: houses.length, anchor: v0, cols: [v0], mass: massInfo[massOf.get(v0)],
       roof: ROOF_TONES[Math.floor(r(3) * ROOF_TONES.length)],
       windows: r(4) < 0.45 ? 'joint' : r(4) < 0.8 ? 'pair' : 'mix',
       head: r(5), shutters: r(6) < 0.45, flowers: r(7) > 0.6, balcony: 0.08 + r(8) * 0.22,
@@ -538,6 +552,32 @@ const roofOf = (v, y) => (houseOf(v) || {}).roof || '#c95f3c';
 // small rule table. Each rule says where a feature may go, what it needs, how many a house may have and
 // how far apart they must be; slots are reserved so features never collide. Drawing code only draws
 // what the plan says, and every placement keeps the reason it was made.
+// ---------- house-type vocabulary ----------
+// Each house type speaks its own architectural language. The planner draws a house's traits from its
+// type's vocabulary; doors, windows, roofs and props are then drawn in that type's style.
+const STYLES = {
+  cottage: {
+    door: 'plank', win: { half: 0.075, y0: 0.42, y1: 0.72 }, pairs: 0, heads: [0, 0.3], shutters: 0.75, flowers: 0.7,
+    balcony: 0, gable: [0.97, 0.9], dormers: 0.15, chimneys: 1, planters: 0.7, ivy: 0.55, shop: 0,
+    roofs: ['#c95f3c', '#b9533b', '#d8723f', '#a94f45', '#8a4a2f'],
+  },
+  townhouse: {
+    door: 'panel', win: { half: 0.085, y0: 0.36, y1: 0.78 }, pairs: 0.5, heads: [0.3, 1], shutters: 0.4, flowers: 0.45,
+    balcony: 0.22, gable: [0.5, 0.45], dormers: 0.25, chimneys: 2, planters: 0.6, ivy: 0.35, shop: 0.45,
+    roofs: ['#dcaa63', '#e3b672', '#cf914e', '#d8723f', '#c95f3c', '#e3824a'],
+  },
+  tower: {
+    door: 'arched', win: { half: 0.05, y0: 0.3, y1: 0.84 }, pairs: 0, heads: [0.75, 1], shutters: 0, flowers: 0.15,
+    balcony: 0.12, gable: [0, 0], dormers: 0, chimneys: 0, planters: 0.3, ivy: 0.2, shop: 0,
+    roofs: ['#4f5d66', '#3d5878', '#5f8f7a', '#6a7f86'],
+  },
+  warehouse: {
+    door: 'barn', win: { half: 0.075, y0: 0.56, y1: 0.8 }, pairs: 0.6, heads: [0, 0.35], shutters: 0.25, flowers: 0,
+    balcony: 0, gable: [1, 1], dormers: 0, chimneys: 1, planters: 0, ivy: 0.45, shop: 0,
+    roofs: ['#5b6670', '#4f5d66', '#6a6460', '#8a4a2f'],
+  },
+};
+const styleOf = v => { const h = houseOf(v); return h && h.style ? h.style : STYLES.townhouse; };
 const isOpen = v => has(v, 0) && !has(v, 1);
 function groundKind(v) {
   if (!has(v, 0)) return 'water';
@@ -557,10 +597,10 @@ function sideContext(v, n, y) {
 const WALKABLE = new Set(['lane', 'plaza', 'courtyard', 'quay']);
 const STREETS = c => c === 'lane' || c === 'plaza' || c === 'quay';
 function houseType(h) {
-  const H = Math.max(...h.cols.map(topOf));
-  if (h.cols.length === 1 && H >= 3) return 'tower';
+  const H = Math.max(...h.cols.map(topOf)), M = h.mass || { cols: h.cols.length, height: H };
+  if (M.cols >= 3 && M.height <= 2) return 'warehouse';
+  if (h.cols.length === 1 && M.cols <= 2 && H >= 3) return 'tower';
   if (H <= 1) return 'cottage';
-  if (h.cols.length >= 3 && H <= 2) return 'warehouse';
   return 'townhouse';
 }
 const sideKey = (v, n, y) => v + '>' + n + ':' + y;
@@ -575,21 +615,28 @@ function lanePair(v) {
   }
   return pair;
 }
-// wall-side rules run in order and each claims the side's main slot; ivy is an overlay on top
+// wall-side rules run in order and each claims the side's main slot; overlays (ivy, props at the foot
+// of the wall) share a second slot so they never pile up on one wall
 const SIDE_RULES = [
-  { kind: 'door', level: 1, ctx: c => WALKABLE.has(c), grounded: true, max: h => (h.cols.length >= 4 ? 2 : 1), p: () => 1,
+  { kind: 'door', at: (v, y) => y === 1, ctx: c => WALKABLE.has(c), grounded: true, max: h => (h.cols.length >= 4 ? 2 : 1), p: () => 1,
     why: 'opens onto a street, plaza, courtyard or quay' },
-  { kind: 'stairs', level: 1, ctx: STREETS, grounded: true, types: ['townhouse', 'warehouse'], max: () => 1, p: () => 0.5,
+  { kind: 'stairs', at: (v, y) => y === 1, ctx: STREETS, grounded: true, types: ['townhouse', 'warehouse'], max: () => 1, p: () => 0.5,
     needs: (v, n) => has(v, 2) && !has(n, 2) && !PLAN.side.has(sideKey(v, n, 2)), claims: (v, n) => [sideKey(v, n, 2)],
     why: 'climbs from the street to a first-floor door' },
-  { kind: 'shop', level: 1, ctx: STREETS, grounded: true, when: h => h.shop && h.type !== 'tower', max: () => 9, p: () => 1,
+  { kind: 'shop', at: (v, y) => y === 1, ctx: STREETS, grounded: true, when: h => h.shop, max: () => 9, p: () => 1,
     why: 'a shopfront on a frontage people walk past' },
-  { kind: 'balcony', level: 2, upward: true, ctx: c => c === 'over-street' || c === 'over-water', when: h => h.type !== 'warehouse',
+  { kind: 'hoist', at: (v, y) => y >= 2 && y === topOf(v), ctx: c => c === 'over-street' || c === 'over-water', types: ['warehouse'],
+    max: () => 1, p: () => 0.85, why: 'a loading door and hoist beam above the street or water' },
+  { kind: 'balcony', at: (v, y) => y >= 2, ctx: c => c === 'over-street' || c === 'over-water', when: h => h.balcony > 0,
     max: h => h.cols.length + 1, p: h => h.balcony * 1.6, why: 'looks out over open space' },
 ];
 const OVERLAY_RULES = [
-  { kind: 'ivy', level: 1, ctx: c => c === 'courtyard' || c === 'plaza' || c === 'lane' || c === 'quay', grounded: true,
-    when: h => h.ivy && h.type !== 'tower', max: () => 3, p: () => 0.7, why: 'climbs a quiet wall from the ground' },
+  { kind: 'woodpile', at: (v, y) => y === 1, ctx: c => STREETS(c) || c === 'courtyard', grounded: true, types: ['cottage'],
+    max: () => 1, p: () => 0.7, why: 'firewood stacked against a cottage wall' },
+  { kind: 'barrels', at: (v, y) => y === 1, ctx: STREETS, grounded: true, types: ['warehouse'], max: () => 2, p: () => 0.8,
+    why: 'goods waiting outside a warehouse' },
+  { kind: 'ivy', at: (v, y) => y === 1, ctx: c => c === 'courtyard' || c === 'plaza' || c === 'lane' || c === 'quay', grounded: true,
+    when: h => h.ivy, max: () => 3, p: () => 0.7, why: 'climbs a quiet wall from the ground' },
 ];
 // ground rules: features on open tiles and on quay edges, kept apart by a minimum spacing
 const NODE_RULES = [
@@ -607,6 +654,14 @@ function planScene() {
   const note = (kind, at, why) => PLAN.log.push({ kind, at, why });
   for (const h of houses) {
     h.type = houseType(h);
+    const st = STYLES[h.type], r = k => hash(h.anchor, 0, 81, k);
+    h.style = st;
+    h.roof = st.roofs[Math.floor(r(1) * st.roofs.length)];
+    h.shutters = r(2) < st.shutters; h.flowers = r(3) < st.flowers; h.balcony = st.balcony * (0.5 + r(4));
+    h.windows = r(5) < st.pairs ? 'pair' : 'joint'; h.head = st.heads[0] + (st.heads[1] - st.heads[0]) * r(6);
+    h.planters = r(7) < st.planters; h.ivy = r(8) < st.ivy; h.shop = r(9) < st.shop;
+    const byHeight = h.cols.slice().sort((a, b) => topOf(b) - topOf(a) || hash(a, 0, 42, 1) - hash(b, 0, 42, 1));
+    h.chimneys = new Set(byHeight.slice(0, Math.min(st.chimneys, h.cols.length)));
     h.doors = new Map();
     const sides = [];
     for (const v of h.cols) for (const n of vAdj[v]) for (let y = 1; y <= topOf(v); y++) {
@@ -616,7 +671,7 @@ function planScene() {
       if (rule.types && !rule.types.includes(h.type)) return;
       if (rule.when && !rule.when(h)) return;
       const salt = rule.kind.charCodeAt(0) * 7 + rule.kind.length;
-      const cands = sides.filter(sd => (rule.upward ? sd.y >= rule.level : sd.y === rule.level) && rule.ctx(sd.ctx)
+      const cands = sides.filter(sd => rule.at(sd.v, sd.y) && rule.ctx(sd.ctx)
         && (!rule.grounded || has(sd.v, 0)) && !map.has(sideKey(sd.v, sd.n, sd.y)) && (!rule.needs || rule.needs(sd.v, sd.n)))
         .sort((a, b) => hash(h.anchor, a.v * 64 + a.y, a.n, salt) - hash(h.anchor, b.v * 64 + b.y, b.n, salt));
       let count = 0;
@@ -867,7 +922,10 @@ function emitWall(cell, y, s, v, b, supported, vv) {
     if (!lowPower) brickRows(F, from, top, col, OPEN);
     if (!s.curve && street) {
       const va = vv[s.k], vb = vv[nx4(s.k)], lo = Math.min(va, vb), hi = Math.max(va, vb);
-      if (PLAN.over.get(sideKey(v, va === v ? vb : va, 1)) === 'ivy') {
+      const overlay = PLAN.over.get(sideKey(v, va === v ? vb : va, 1));
+      if (overlay === 'woodpile') emitWoodpile(F, y);
+      if (overlay === 'barrels') emitBarrels(F, y, lo * 1000 + hi);
+      if (overlay === 'ivy') {
         // ivy grows as vines from a few roots at the foot of the wall: each climbs with a gentle sway,
         // branches now and then, thins toward the top, and stops at windows and at the building's height
         const reach = has(v, 2) ? (has(v, 3) ? 2.3 : 1.65) : 0.82;
@@ -983,13 +1041,9 @@ function emitFacade(y, s, F, v, b, vv, cell) {
   }
 
   if (planned === 'door') {
-    wb(F, 0, 0.21, 0, 0.025, y, y + 0.74, trim);
-    wb(F, 0, 0.16, 0, 0.04, y, y + 0.66, lin(C.wood));
-    OPEN.push([-0.01, 0.25, y - 0.1, y + 0.9]);
-    wb(F, 0.02, 0.06, 0.04, 0.05, y + 0.3, y + 0.36, lin(C.gold));
-    wslab(F, 0, 0.28, 0, y + 0.84, 0.24, y + 0.74, 0.035, lin(roofHex));
-    wb(F, 0, 0.25, 0, 0.17, y, y + 0.05, lin(C.stoneLip));
-    if (L > 0.33) {
+    const kind = styleOf(v).door;
+    emitDoor(F, y, L, kind, roofOf(v, y), lo, hi);
+    if (kind !== 'barn' && L > 0.33) {
       wb(F, 0.27, 0.32, 0, 0.07, y + 0.52, y + 0.62, lin(C.lamp), 'lit');
       wb(F, 0.285, 0.305, 0, 0.07, y + 0.62, y + 0.66, lin(C.wood));
     }
@@ -1007,7 +1061,7 @@ function emitFacade(y, s, F, v, b, vv, cell) {
   // the window type depends on the facade edge only (not the floor), so windows stack floor to floor
   const hh = hash(lo, hi, 0, 21);
   // dormer on the roof slope above this wall, centred on the joint like the windows
-  if (L > 0.3 && !has(v, y + 1) && !isolated(v, y) && !isGable(v, y, other) && hash(lo, hi, y, 31) < 0.22) {
+  if (L > 0.3 && !has(v, y + 1) && !isolated(v, y) && !isGable(v, y, other) && hash(lo, hi, y, 31) < styleOf(v).dormers) {
     const roofHexD = roofOf(v, y), base = y + 1;
     wb(F, 0, 0.13, -0.42, -0.1, base - 0.05, base + 0.3, lin(b.c, toneOf(v, y)));
     wb(F, 0, 0.1, -0.1, -0.085, base + 0.04, base + 0.26, trim);
@@ -1018,7 +1072,7 @@ function emitFacade(y, s, F, v, b, vv, cell) {
                   P(0, -0.06, base + 0.46), P(0.18, -0.06, base + 0.32), P(0.18, -0.46, base + 0.32), P(0, -0.46, base + 0.46)], rc, [0.7, 0.7, 0.7, 0.7, 1, 1, 1, 1]);
     face('main', [P(0, -0.1, base + 0.3), P(0.13, -0.1, base + 0.3), P(0, -0.1, base + 0.42)], lin(b.c, toneOf(v, y)), ref);
   }
-  const sill = (s0, s1) => wb(F, s0, s1, 0, 0.08, y + 0.3, y + 0.35, trim);
+  const sill = (s0, s1) => { const sy = y + styleOf(v).win.y0; wb(F, s0, s1, 0, 0.08, sy - 0.05, sy, trim); };
   // each house column keeps one window-head style: plain lintel, pediment or round arch
   const headStyle = house.head;
   const head = (s1, top) => {
@@ -1032,7 +1086,8 @@ function emitFacade(y, s, F, v, b, vv, cell) {
       }
     }
   };
-  const jointWindow = (half, y0 = 0.4, y1 = 0.74) => {
+  const W0 = styleOf(v).win;
+  const jointWindow = (half = W0.half, y0 = W0.y0, y1 = W0.y1) => {
     frameRing(F, 0, half, y + y0 + 0.035, y + y1 - 0.035, 0.035, trim, true);
     hole(F, 0, half, y + y0 + 0.035, y + y1 - 0.035, lit);
     wb(F, 0, 0.011, 0, 0.042, y + y0 + 0.035, y + y1 - 0.035, trim);
@@ -1059,6 +1114,23 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     }
     return;
   }
+  if (planned === 'hoist' && L > 0.25) {
+    const wood = lin(C.wood), dark = lin(shade(C.wood, 0.7));
+    OPEN.push([-0.01, 0.22, y - 0.1, y + 1]);
+    wb(F, 0, 0.19, 0, 0.025, y + 0.04, y + 0.82, lin(C.trim));
+    for (let i = 0; i < 3; i++) wb(F, i * 0.05, i * 0.05 + 0.048, 0, 0.036, y + 0.06, y + 0.78, i & 1 ? wood : lin(shade(C.wood, 1.12)));
+    wb(F, 0, 0.16, 0.036, 0.046, y + 0.4, y + 0.44, dark);
+    if (cell.i < cell.nb[s.k]) {
+      // the beam is drawn once, by one half of the joint
+      wb(F, -0.025, 0.025, -0.05, 0.42, y + 0.9, y + 0.96, dark);
+      wb(F, -0.03, 0.03, 0.36, 0.42, y + 0.84, y + 0.9, lin('#3b4148'));
+      const rx = F.a[0] + F.n[0] * 0.39, rz = F.a[1] + F.n[1] * 0.39;
+      rod([rx, y + 0.84, rz], [rx, y + 0.42, rz], 0.005, lin('#c8b48a'));
+      boxAt(rx, rz, 0.07, y + 0.27, y + 0.42, lin('#c9a273'));
+      boxAt(rx, rz, 0.072, y + 0.33, y + 0.35, lin(shade('#c9a273', 0.8)));
+    }
+    return;
+  }
   if (hh < 0.06) return;   // an occasional blank wall, the same on every floor
   if (planned === 'balcony') {
     // french window with a balcony
@@ -1078,12 +1150,13 @@ function emitFacade(y, s, F, v, b, vv, cell) {
   }
   const pair = L > 0.34 && (house.windows === 'pair' || (house.windows === 'mix' && hh > 0.5));
   if (pair) {
-    const sc = L * 0.55;
-    frameRing(F, sc - 0.065, sc + 0.065, y + 0.435, y + 0.715, 0.035, trim);
-    hole(F, sc - 0.065, sc + 0.065, y + 0.435, y + 0.715, lit);
-    wb(F, sc - 0.006, sc + 0.006, 0, 0.042, y + 0.435, y + 0.715, trim);
-    wb(F, sc - 0.065, sc + 0.065, 0, 0.042, y + 0.567, y + 0.583, trim);
-    sill(sc - 0.12, sc + 0.12);
+    const sc = L * 0.55, hw = W0.half * 0.78, ya = y + W0.y0 + 0.035, yb = y + W0.y1 - 0.035;
+    frameRing(F, sc - hw, sc + hw, ya, yb, 0.035, trim);
+    hole(F, sc - hw, sc + hw, ya, yb, lit);
+    wb(F, sc - 0.006, sc + 0.006, 0, 0.042, ya, yb, trim);
+    wb(F, sc - hw, sc + hw, 0, 0.042, (ya + yb) / 2 - 0.008, (ya + yb) / 2 + 0.008, trim);
+    sill(sc - hw - 0.055, sc + hw + 0.055);
+    if (house.type === 'warehouse') return;
     if (house.shutters && L > 0.42) {
       const sh = lin(house.shutterCol);
       wb(F, sc - 0.17, sc - 0.105, 0, 0.04, y + 0.42, y + 0.73, sh);
@@ -1091,12 +1164,105 @@ function emitFacade(y, s, F, v, b, vv, cell) {
     }
     return;
   }
-  jointWindow(0.085);
-  sill(0, 0.14);
-  if (house.shutters && L > 0.3) wb(F, 0.125, 0.205, 0, 0.04, y + 0.42, y + 0.73, lin(house.shutterCol));
+  if (house.type === 'tower' && y >= 2 && y === topOf(v)) {
+    // a round window near the top of a tower
+    const cy = y + 0.56, r = 0.11, N = 6;
+    for (let i = 0; i < N; i++) {
+      const a0 = (i / N) * Math.PI, a1 = ((i + 1) / N) * Math.PI;
+      wseg(F, Math.sin(a0) * r, cy + Math.cos(a0) * r, Math.sin(a1) * r, cy + Math.cos(a1) * r, 0, 0.03, 0.03, trim);
+    }
+    hole(F, 0, 0.07, cy - 0.07, cy + 0.07, lit);
+    wb(F, 0, 0.011, 0, 0.034, cy - 0.08, cy + 0.08, trim);
+    wb(F, 0, 0.08, 0, 0.034, cy - 0.006, cy + 0.006, trim);
+    return;
+  }
+  jointWindow();
+  sill(0, W0.half + 0.055);
+  if (house.type === 'warehouse') return;
+  if (house.shutters && L > 0.3) wb(F, W0.half + 0.04, W0.half + 0.12, 0, 0.04, y + W0.y0 + 0.02, y + W0.y1 - 0.01, lin(house.shutterCol));
   else if (house.flowers) {
-    wb(F, 0, 0.16, 0, 0.1, y + 0.35, y + 0.42, lin(C.leaf));
-    for (const sx of [0.04, 0.11]) wb(F, sx, sx + 0.035, 0.05, 0.085, y + 0.42, y + 0.46, lin(hh > 0.5 ? '#f2a7b5' : '#fbe7a1'));
+    const fy = y + W0.y0;
+    wb(F, 0, W0.half + 0.07, 0, 0.1, fy - 0.03, fy + 0.04, lin(C.leaf));
+    for (const sx of [0.03, W0.half]) wb(F, sx, sx + 0.035, 0.05, 0.085, fy + 0.04, fy + 0.08, lin(hh > 0.5 ? '#f2a7b5' : '#fbe7a1'));
+  }
+}
+
+// a door in the house type's own style; s = 0 is the joint, so each half draws its side
+function emitDoor(F, y, L, kind, roofHex, lo, hi) {
+  const trim = lin(C.trim), wood = lin(C.wood), dark = lin(shade(C.wood, 0.7)), iron = lin('#33373d');
+  if (kind === 'barn' && L > 0.3) {
+    // a wide double plank door with a Z brace, no canopy
+    OPEN.push([-0.01, 0.3, y - 0.1, y + 0.9]);
+    wb(F, 0, 0.27, 0, 0.03, y + 0.74, y + 0.8, lin(shade(C.wood, 0.8)));
+    wb(F, 0.24, 0.27, 0, 0.03, y, y + 0.74, lin(shade(C.wood, 0.8)));
+    for (let i = 0; i < 4; i++) wb(F, i * 0.06, i * 0.06 + 0.058, 0, 0.034, y, y + 0.74, i & 1 ? wood : lin(shade(C.wood, 1.12)));
+    wseg(F, 0.02, y + 0.12, 0.22, y + 0.6, 0.034, 0.046, 0.04, dark);
+    wb(F, 0.01, 0.23, 0.034, 0.046, y + 0.1, y + 0.14, dark);
+    wb(F, 0.01, 0.23, 0.034, 0.046, y + 0.58, y + 0.62, dark);
+    wb(F, 0, 0.28, 0, 0.12, y, y + 0.03, lin(C.stone));
+    return;
+  }
+  if (kind === 'arched') {
+    // a tall round-headed door in a stone surround, with iron straps
+    OPEN.push([-0.01, 0.24, y - 0.1, y + 1]);
+    const r = 0.13, top = y + 0.66, N = 6;
+    wb(F, 0, 0.13, 0, 0.04, y, top, wood);
+    for (let i = 0; i < N; i++) {
+      const a0 = (i / N) * Math.PI / 2, a1 = ((i + 1) / N) * Math.PI / 2;
+      const s0 = Math.sin(a0) * r, s1 = Math.sin(a1) * r;
+      wb(F, s0, s1, 0, 0.04, top, top + Math.cos(a1) * r, wood);
+      wseg(F, s0, top + Math.cos(a0) * (r + 0.05), s1, top + Math.cos(a1) * (r + 0.05), 0, 0.03, 0.05, trim);
+    }
+    wb(F, r, r + 0.05, 0, 0.03, y, top, trim);
+    for (const yy of [y + 0.16, y + 0.48]) wb(F, 0, 0.12, 0.04, 0.05, yy, yy + 0.025, iron);
+    wb(F, 0.015, 0.035, 0.04, 0.055, y + 0.32, y + 0.36, iron);
+    wb(F, 0, 0.22, 0, 0.16, y, y + 0.05, lin(C.stoneLip));
+    return;
+  }
+  if (kind === 'plank') {
+    // a low cottage door of vertical planks under a small pitched hood
+    OPEN.push([-0.01, 0.22, y - 0.1, y + 0.85]);
+    wb(F, 0, 0.17, 0, 0.025, y, y + 0.66, trim);
+    wb(F, 0, 0.13, 0, 0.04, y, y + 0.6, wood);
+    for (const sx of [0.045, 0.09]) wb(F, sx, sx + 0.006, 0.04, 0.046, y + 0.02, y + 0.58, dark);
+    wb(F, 0.02, 0.05, 0.04, 0.055, y + 0.28, y + 0.33, lin(C.gold));
+    wslab(F, 0, 0.22, 0, y + 0.82, 0.2, y + 0.68, 0.03, lin(roofHex));
+    wb(F, 0, 0.2, 0, 0.14, y, y + 0.04, lin(C.stone));
+    return;
+  }
+  // panel: a townhouse door with a fanlight above and a canopy
+  OPEN.push([-0.01, 0.25, y - 0.1, y + 0.95]);
+  wb(F, 0, 0.21, 0, 0.025, y, y + 0.82, trim);
+  wb(F, 0, 0.16, 0, 0.04, y, y + 0.64, wood);
+  for (const yy of [y + 0.08, y + 0.36]) wb(F, 0.03, 0.13, 0.04, 0.048, yy, yy + 0.22, lin(shade(C.wood, 1.15)));
+  wb(F, 0.02, 0.06, 0.048, 0.056, y + 0.3, y + 0.36, lin(C.gold));
+  hole(F, 0, 0.15, y + 0.67, y + 0.78, hash(lo, hi, 1, 66) < 0.6 ? 'lit' : 'dark');
+  wb(F, 0, 0.011, 0, 0.034, y + 0.67, y + 0.78, trim);
+  wslab(F, 0, 0.28, 0, y + 0.92, 0.24, y + 0.83, 0.035, lin(roofHex));
+  wb(F, 0, 0.25, 0, 0.17, y, y + 0.05, lin(C.stoneLip));
+}
+
+// ---------- props that belong to a house type ----------
+function emitWoodpile(F, y) {
+  const s0 = Math.max(0.3, F.L * 0.45);
+  if (F.L - s0 < 0.22) return;
+  for (let r = 0; r < 3; r++) for (let k = 0; k < 3 - (r === 2 ? 1 : 0); k++) {
+    const tone = hash(Math.round(F.a[0] * 40), r, k, 67);
+    wb(F, s0, s0 + 0.2, 0.02 + k * 0.042, 0.058 + k * 0.042, y + r * 0.04, y + r * 0.04 + 0.038, lin(shade('#8a5f3c', 0.85 + tone * 0.3)));
+  }
+  wslab(F, s0 - 0.02, s0 + 0.22, 0, y + 0.2, 0.16, y + 0.15, 0.015, lin(shade(C.wood, 0.9)));
+}
+function emitBarrels(F, y, seed) {
+  const s0 = Math.max(0.34, F.L * 0.5);
+  if (F.L - s0 < 0.16) return;
+  const iron = lin('#3b4148');
+  for (let i = 0; i < 2; i++) {
+    const sx = s0 + 0.07 + i * 0.15;
+    if (sx > F.L - 0.06) break;
+    const x = F.a[0] + F.t[0] * sx + F.n[0] * 0.1, z = F.a[1] + F.t[1] * sx + F.n[1] * 0.1, tall = 0.15 + hash(seed, i, 1, 68) * 0.03;
+    boxAt(x, z, 0.06, y, y + tall, lin(shade('#9a6b45', 0.9 + 0.2 * hash(seed, i, 2, 68))));
+    for (const hy of [0.03, tall - 0.045]) boxAt(x, z, 0.064, y + hy, y + hy + 0.014, iron);
+    boxAt(x, z, 0.052, y + tall, y + tall + 0.006, lin(shade('#9a6b45', 0.7)));
   }
 }
 
