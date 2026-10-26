@@ -25,7 +25,7 @@ Data flows one way: **model → analysis → planner → features/geometry → r
 
 | folder | what it holds | may import |
 |---|---|---|
-| `src/core` | grid, block model, palette, dims, util, sample towns | core |
+| `src/core` | grid, block model, build targets, palette, dims, util, sample towns | core |
 | `src/plan` | houses, scene analysis (tiles, sides, walking network), styles, planner and validator | core, plan, features |
 | `src/features` | one module per planned detail: rule, check, draw. `index.js` is the registry | core, plan, geom |
 | `src/geom` | builder (mesh buckets), shared geometry rules, buildings, ground, `town.js` (whole town as data, digest) | core, plan, features, geom |

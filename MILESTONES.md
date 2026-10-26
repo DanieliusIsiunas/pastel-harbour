@@ -147,6 +147,14 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       spread went from 3.8× to 2×, irregular corners from 149 to about 60, and quads are squarer
       (median smallest angle 70° → 75°). Saved towns move to the new grid by matching each old corner to
       a nearby new one.
+- [x] **E3 No corner-only streets** — E1 still let a click away from the cell centre lay a tile that met
+      the street only at a corner, so clicking along a diagonal made a chain of pinched diamonds. Now a
+      water click whose footprint would only touch a street at a corner lays the corner between them
+      instead (the one nearer the cursor), and the next click on the same spot lays the diagonal tile:
+      a diagonal line of clicks becomes a connected stepped street. The hover preview shows the
+      redirect. The build-target rule moved from `app/picking.js` to `core/target.js` so Node tests
+      cover it; on 9,000 random clicks over three sample towns no new tile touches a street only at a
+      corner (the 1.2% left by E1).
 
 ### Real-life logic and light round
 

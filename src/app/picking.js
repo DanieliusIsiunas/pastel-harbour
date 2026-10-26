@@ -3,9 +3,10 @@ import { commit } from './history.js';
 import { updateGhost } from './input.js';
 import { S } from './state.js';
 import { WATER } from '../core/dims.js';
-import { UVM, VERTS, cells, footprintAt, pv4, vAdj, vCells, vFixed, xz } from '../core/grid.js';
-import { blocks, has, keyOf } from '../core/model.js';
-import { MAXY, PALETTE } from '../core/palette.js';
+import { UVM, VERTS, cells, pv4, vCells, xz } from '../core/grid.js';
+import { blocks, keyOf } from '../core/model.js';
+import { PALETTE } from '../core/palette.js';
+import { groundTarget, valid } from '../core/target.js';
 import { P3 } from '../core/util.js';
 import { chime, pluck, poof } from '../fx/sound.js';
 import { face, makeBuilder, newMesh } from '../geom/builder.js';
@@ -17,7 +18,6 @@ import { disposeGroup, pickMesh, pickMeta, requestRegen } from '../render/town.j
 export const ray = new THREE.Raycaster();
 export const ndc = new THREE.Vector2();
 export const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(WATER + 0.1));
-export const valid = (v, y) => v >= 0 && !vFixed[v] && y >= 0 && y < MAXY && !has(v, y);
 
 export function pick(cx, cy, erase) {
   const rect = canvas.getBoundingClientRect();
@@ -44,25 +44,6 @@ export function pick(cx, cy, erase) {
     return best >= 0 ? { v: best, y } : null;
   }
   return pd < Infinity ? groundTarget(p.x, p.z) : null;
-}
-// A click on the water lays a street on the footprint under the cursor, exactly the patch the water grid
-// outlines. Near a cell centre, where four footprints meet and a hair's difference decides, it prefers
-// a footprint that joins a street along a side, so a line of clicks becomes one connected street rather
-// than tiles touching at their corners. A footprint that is already taken (the water in the cut-off
-// corner of a rounded quay) passes to the nearest free corner of the same cell, so no click is wasted.
-const HUB = 0.35;
-const joinsStreet = v => vAdj[v].some(n => has(n, 0));
-function groundTarget(x, z) {
-  const f = footprintAt(x, z);
-  if (!f) return null;
-  if (f.hub > HUB) return valid(f.v, 0) ? { v: f.v, y: 0 } : null;
-  if (valid(f.v, 0) && joinsStreet(f.v)) return { v: f.v, y: 0 };
-  const free = f.cell.v.filter(v => valid(v, 0)), joined = free.filter(joinsStreet);
-  const d2 = v => (VERTS[v][0] - x) ** 2 + (VERTS[v][1] - z) ** 2;
-  const nearest = list => list.reduce((a, b) => (d2(b) < d2(a) ? b : a));
-  if (joined.length) return { v: nearest(joined), y: 0 };
-  if (valid(f.v, 0)) return { v: f.v, y: 0 };
-  return free.length ? { v: nearest(free), y: 0 } : null;
 }
 // what the hover preview shows is what a click builds: the click reuses the previewed target unless the
 // pointer has moved since
