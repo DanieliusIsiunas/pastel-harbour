@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { commit } from './history.js';
 import { sampleTown } from '../core/sample.js';
 import { VERTS, vAdj, vertexAt } from '../core/grid.js';
@@ -12,9 +13,9 @@ import { PLAN } from '../plan/planner.js';
 import { BRICK_GEO, brickMat, maskMat, roomDarkMat, roomLitMat } from '../render/materials.js';
 import { bloom, gtao, renderFrame } from '../render/post.js';
 import { TIMES, applyTime, cur, toState } from '../render/time.js';
-import { camera, controls, renderer, water } from '../render/stage.js';
+import { camera, controls, renderer, scene, water } from '../render/stage.js';
 import { requestRegen, ripple, townObj } from '../render/town.js';
-import { cameraState, setManualCamera } from '../render/director.js';
+import { cameraState, directCamera, setManualCamera, steerCamera } from '../render/director.js';
 
 // close-ups may come nearer than the player's zoom limit; the limit returns on the next wider view
 window.harbourView = (x, y, z, tx = 0, ty = 1, tz = 0) => {
@@ -71,6 +72,34 @@ window.harbourDev = {
   // hand the camera back to the director after harbourView, and report what it is doing
   auto: () => setManualCamera(false),
   camera: () => cameraState(),
+  // how far the camera's viewing direction is off its target at the moment each frame is drawn, sampled for
+  // ms milliseconds (degrees): a camera that is moved but not re-aimed shows up here as shaking
+  aimProbe: ms => new Promise(done => {
+    const errs = [], fwd = new THREE.Vector3(), to = new THREE.Vector3(), prev = scene.onBeforeRender;
+    scene.onBeforeRender = (r, s, cam) => {
+      if (cam !== camera) return;
+      cam.getWorldDirection(fwd); to.copy(controls.target).sub(cam.position).normalize();
+      errs.push(Math.acos(Math.min(1, fwd.dot(to))) * 180 / Math.PI);
+    };
+    setTimeout(() => {
+      scene.onBeforeRender = prev;
+      done({ frames: errs.length, maxDeg: +Math.max(0, ...errs).toFixed(3), meanDeg: +(errs.reduce((a, b) => a + b, 0) / (errs.length || 1)).toFixed(3) });
+    }, ms);
+  }),
+  // runs the camera's per-frame steps for n frames of a held arrow key, synchronously (no animation frames
+  // needed), and reports how far the view direction is off the target when each frame would be drawn
+  steerTest: (turn = 1, zoom = 0, n = 60) => {
+    const fwd = new THREE.Vector3(), to = new THREE.Vector3(), errs = [];
+    for (let i = 0; i <= n + 20; i++) {
+      controls.update();
+      steerCamera(i < n ? turn : 0, i < n ? zoom : 0, 1 / 60);
+      directCamera(1 / 60);
+      camera.updateMatrixWorld();
+      camera.getWorldDirection(fwd); to.copy(controls.target).sub(camera.position).normalize();
+      errs.push(Math.acos(Math.min(1, fwd.dot(to))) * 180 / Math.PI);
+    }
+    return { frames: errs.length, maxDeg: +Math.max(...errs).toFixed(3), meanDeg: +(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(3) };
+  },
   // jump straight to a time of day (Day, Dusk, Night) without the transition
   time: name => { Object.assign(cur, toState(TIMES[name])); applyTime(); },
   // How dark and harsh the picture is, read back from the rendered frame at fixed camera views (the

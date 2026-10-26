@@ -86,7 +86,9 @@ touch the DOM. That keeps them running in Node (tests) and movable to a worker l
 5. Frame rate: 60 fps on the default town with the browser pane visible. A hidden pane throttles animation
    frames, so timing numbers from it are meaningless.
 
-Gotchas: the planner keeps module state (`PLAN`, `WALK`, houses); call `emitTown()` (or rebuild) before reading
+Gotchas: anything that moves the camera after `controls.update()` must re-aim it (`aim()` in the director),
+or the frame is drawn looking a step behind and the view shakes; `harbourDev.steerTest()` measures it.
+The planner keeps module state (`PLAN`, `WALK`, houses); call `emitTown()` (or rebuild) before reading
 it. Importing a source module from the console after hot reload can give a second copy of it; go through
 `harbourDev` instead.
 

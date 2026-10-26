@@ -254,7 +254,9 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
 - [x] **C2 Arrow keys** — left and right orbit around the town, up and down zoom in and out. The speed eases
       in and out over a fraction of a second, so a tap nudges and a hold glides (a full turn takes about
       4 s; holding up halves the distance in about a second). Key zoom is kept as the player's zoom like
-      the wheel's, and letting go of an orbit applies the usual framing rule.
+      the wheel's, and letting go of an orbit applies the usual framing rule. Steering and the director now
+      re-aim the camera after moving it; before, each frame was drawn about 1° behind and the view shook
+      (`harbourDev.steerTest()` measures it: 0.97° average before, 0° now).
 
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).

@@ -137,6 +137,7 @@ export function directCamera(dt) {
   camera.position.copy(controls.target).addScaledVector(_d, nd);
   state.lastDist = nd;
   state.lastTarget.copy(controls.target);
+  aim();
 }
 // Arrow keys: left and right orbit around the town, up and down zoom in and out. The speed eases in and out
 // over a fraction of a second, so a tap nudges and a hold glides. Zoom goes through the same distance the
@@ -161,7 +162,12 @@ export function steerCamera(turn, zoom, dt) {
     _off.multiplyScalar(nd / d);
   }
   camera.position.copy(controls.target).add(_off);
+  aim();
 }
+// The orbit controls aim the camera when they update, before the steering and the director move it. A camera
+// moved after that and drawn without re-aiming looks a step behind where it should, then snaps back on the
+// next update: at 60 frames a second that reads as shaking. Whatever moves the camera re-aims it.
+function aim() { camera.lookAt(controls.target); camera.updateMatrixWorld(); }
 // Depth precision depends almost entirely on the near plane: with it at 0.1 the depth buffer could not tell
 // apart surfaces a few millimetres apart at normal viewing distances, and details on walls flickered. The
 // near plane now follows the camera, a tenth of the way to what it looks at (nothing is ever that close),
