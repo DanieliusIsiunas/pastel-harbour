@@ -138,6 +138,30 @@ export function directCamera(dt) {
   state.lastDist = nd;
   state.lastTarget.copy(controls.target);
 }
+// Arrow keys: left and right orbit around the town, up and down zoom in and out. The speed eases in and out
+// over a fraction of a second, so a tap nudges and a hold glides. Zoom goes through the same distance the
+// director reads, so it is kept as the player's zoom like the wheel's; letting go of an orbit applies the
+// usual rule (step back only if the town no longer fits).
+const steer = { turn: 0, zoom: 0, turning: false };
+const _up = new THREE.Vector3(0, 1, 0), _off = new THREE.Vector3();
+export function steerCamera(turn, zoom, dt) {
+  const ease = 1 - Math.exp(-dt / (reduceMotion ? 0.02 : 0.12));
+  steer.turn += (turn - steer.turn) * ease;
+  steer.zoom += (zoom - steer.zoom) * ease;
+  if (Math.abs(steer.turn) < 1e-3 && !turn) steer.turn = 0;
+  if (Math.abs(steer.zoom) < 1e-3 && !zoom) steer.zoom = 0;
+  if (!steer.turn && !steer.zoom) {
+    if (steer.turning) { steer.turning = false; if (state.ready && !state.manual) reframe(); }
+    return;
+  }
+  _off.copy(camera.position).sub(controls.target);
+  if (steer.turn) { _off.applyAxisAngle(_up, -steer.turn * 1.5 * dt); steer.turning = true; }
+  if (steer.zoom) {
+    const d = _off.length(), nd = THREE.MathUtils.clamp(d * Math.exp(-steer.zoom * 0.7 * dt), DIST_MIN, DIST_MAX);
+    _off.multiplyScalar(nd / d);
+  }
+  camera.position.copy(controls.target).add(_off);
+}
 // Depth precision depends almost entirely on the near plane: with it at 0.1 the depth buffer could not tell
 // apart surfaces a few millimetres apart at normal viewing distances, and details on walls flickered. The
 // near plane now follows the camera, a tenth of the way to what it looks at (nothing is ever that close),

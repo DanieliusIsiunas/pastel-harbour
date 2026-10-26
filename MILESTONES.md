@@ -251,6 +251,11 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       and bricks are cut at the edge of an opening like masonry at a reveal. Bricks reaching into openings
       went from 526 (town A), 734 (town B) and 70 (house types) to none, and a test keeps it there.
 
+- [x] **C2 Arrow keys** — left and right orbit around the town, up and down zoom in and out. The speed eases
+      in and out over a fraction of a second, so a tap nudges and a hold glides (a full turn takes about
+      4 s; holding up halves the distance in about a second). Key zoom is kept as the player's zoom like
+      the wheel's, and letting go of an orbit applies the usual framing rule.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
