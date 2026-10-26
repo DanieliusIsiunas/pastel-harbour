@@ -1,9 +1,9 @@
 import { EDGE, GROUND, GROUND_ROUND, WATER } from '../core/dims.js';
 import { UVM, VERTS, cells, nx4, pv4, vAdj, vCells, xz } from '../core/grid.js';
 import { has } from '../core/model.js';
-import { C, IRON, LEAVES, PALETTE, PAVERS } from '../core/palette.js';
-import { P3, hash, l2, lin, norm2, outward, shade, sub2 } from '../core/util.js';
-import { blob, boxAt, face, hexa, pickQuad, pickTri, wb } from './builder.js';
+import { C, IRON, LEAVES, PAVERS } from '../core/palette.js';
+import { P3, hash, l2, lin, norm2, outward, sub2 } from '../core/util.js';
+import { blob, boxAt, face, hexa, pickQuad, pickTri } from './builder.js';
 import { PLAN } from '../plan/planner.js';
 import { edgeKey } from '../plan/analysis.js';
 import { feature } from '../features/index.js';
@@ -67,11 +67,12 @@ export function emitGroundCell(bld, ci) {
         const facing = i === 0 ? vv[nx4(q)] : i === R.length - 2 ? vv[pv4(q)] : -1;
         const straight = !(R[i].cv && R[i + 1].cv), L2 = Math.hypot(c[0] - a[0], c[1] - a[1]);
         const ef = facing >= 0 && straight ? PLAN.edge.get(edgeKey(v, facing)) : null;
-        const here = ef && ef.cell === ci && L2 > 0.3 ? feature.get(ef.kind) : null;
-        if (here && here.replacesRailing) here.draw(bld, { a, c, Vq, L2 });
+        const kf = ef ? feature.get(ef.kind) : null, here = kf && ef.cell === ci && (L2 > 0.3 || kf.clearsEdge) ? kf : null;
+        // a boat moored alongside needs the whole edge open, in both cells, to step aboard
+        if (here && here.replacesRailing || kf && kf.clearsEdge) { if (here) here.draw(bld, { a, c, Vq, L2, v, n: facing }); }
         else if (!has(v, 1)) {
           railing(bld, pt(R[i], EDGE - 0.02), pt(R[i + 1], EDGE - 0.02), GROUND + 0.045);
-          if (here) here.draw(bld, { a, c, Vq, L2 });
+          if (here) here.draw(bld, { a, c, Vq, L2, v, n: facing });
         }
       }
     }
@@ -96,15 +97,6 @@ export function emitGroundCell(bld, ci) {
 export function emitTileFeature(bld, v, kind) {
   const f = feature.get(kind);
   if (f) f.draw(bld, { v, x: VERTS[v][0], z: VERTS[v][1] });
-}
-// a little rowboat lying along direction t, centred at (x, z)
-export function rowboat(bld, x, z, t, seed) {
-  const n = [-t[1], t[0]], F = { a: [x - t[0] * 0.28, z - t[1] * 0.28], t, n, L: 0.56 };
-  const wood = lin(C.wood), rim = lin(PALETTE[Math.floor(hash(seed, 3, 3, 48) * PALETTE.length)].wall);
-  wb(bld, F, 0.06, 0.5, -0.09, 0.09, WATER - 0.03, WATER + 0.05, wood);
-  wb(bld, F, 0.0, 0.56, -0.11, 0.11, WATER + 0.05, WATER + 0.09, rim);
-  wb(bld, F, 0.0, 0.56, -0.08, 0.08, WATER + 0.06, WATER + 0.075, lin(shade(C.wood, 0.6)));
-  wb(bld, F, 0.24, 0.32, -0.1, 0.1, WATER + 0.08, WATER + 0.1, lin(C.flat));
 }
 // a tree in a round planter
 export function plantedTree(bld, x, z, seed) {
