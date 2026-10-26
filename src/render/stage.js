@@ -65,17 +65,47 @@ export const WaterShader = {
     color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null },
     uTime: { value: 0 }, uWater: { value: new THREE.Color('#5d9ca6') }, uAlpha: { value: 0.86 }, uRefl: { value: 0.2 },
     uFog: { value: new THREE.Color('#9fc6ca') }, uFogNear: { value: 45 }, uFogFar: { value: 150 },
+    uRip: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, -99, 0)) }, uNow: { value: 0 },
   },
   vertexShader: `uniform mat4 textureMatrix; varying vec4 vUv; varying vec3 vWP;
 void main() { vUv = textureMatrix * vec4(position, 1.0); vec4 wp = modelMatrix * vec4(position, 1.0); vWP = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }`,
   fragmentShader: `uniform sampler2D tDiffuse; uniform vec3 uWater; uniform vec3 uFog; uniform float uTime; uniform float uAlpha; uniform float uRefl; uniform float uFogNear; uniform float uFogFar;
+uniform vec4 uRip[8]; uniform float uNow;
 varying vec4 vUv; varying vec3 vWP;
+// soft value noise, for foam that breaks up instead of drawing a clean line
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2(i), hash2(i + vec2(1, 0)), f.x), mix(hash2(i + vec2(0, 1)), hash2(i + vec2(1, 1)), f.x), f.y); }
 void main() {
   vec2 d = vec2(sin(vWP.x * 1.6 + uTime * 1.1) + sin(vWP.z * 2.2 - uTime * 0.8), cos(vWP.z * 1.8 + uTime * 0.9) + sin(vWP.x * 1.2 - uTime * 0.7)) * 0.006;
-  vec4 uv = vUv; uv.xy += d * uv.w;
+  // ripples from a new or removed street: a train of a few crests that leaves the tile's edge, spreads,
+  // stretches out (longer waves outrun shorter ones) and calms down. Crests bend the reflection, catch
+  // the light, and the leading one carries a ragged band of foam
+  float h = 0.0, foam = 0.0; vec2 g = vec2(0.0);
+  for (int i = 0; i < 8; i++) {
+    vec4 R = uRip[i]; float age = uNow - R.z;
+    if (age < 0.0 || age > 3.2) continue;
+    vec2 dv = vWP.xz - R.xy; float dist = length(dv);
+    float front = 0.6 + 1.25 * age - 0.12 * age * age, x = dist - front;
+    float train = exp(-pow(max(x, 0.0) * 9.0, 2.0)) * smoothstep(-0.95 - 0.35 * age, -0.1, x);
+    float k = 15.0 / (1.0 + 0.55 * age), amp = R.w * exp(-1.1 * age) / (1.0 + 0.6 * dist);
+    h += sin(x * k) * train * amp;
+    g += dv / max(dist, 1e-3) * cos(x * k) * train * amp;
+    // the foam rides the leading crest as a soft band that thins out and tears into gaps as it spreads
+    float band = smoothstep(0.45, 0.8, exp(-pow((x + 0.05) * 13.0, 2.0)));
+    float tear = vnoise(vec2(atan(dv.y, dv.x) * 4.0, age * 0.7) + R.xy) * 0.75 + vnoise(vWP.xz * 6.0 + R.xy) * 0.25;
+    foam += band * R.w * smoothstep(0.0, 0.5, 1.0 - age / 2.4) * smoothstep(0.12 + 0.3 * age, 0.3 + 0.3 * age, tear);
+    // a second, fainter line on the next crest behind
+    float band2 = smoothstep(0.5, 0.85, exp(-pow((x + 0.05 + 6.2832 / k) * 15.0, 2.0)));
+    foam += 0.45 * band2 * R.w * smoothstep(0.0, 0.5, 1.0 - age / 1.8) * smoothstep(0.25 + 0.3 * age, 0.45 + 0.3 * age, tear);
+  }
+  vec4 uv = vUv; uv.xy += (d + g * 0.035) * uv.w;
   vec3 col = mix(uWater, texture2DProj(tDiffuse, uv).rgb, uRefl);
+  // crests catch the sky, troughs dip a little: soft light bands rather than lines
+  col += vec3(0.16, 0.18, 0.18) * max(h, 0.0) - vec3(0.05) * max(-h, 0.0);
+  col = mix(col, vec3(0.97, 0.99, 1.0), clamp(foam, 0.0, 1.0) * 0.85);
   float f = smoothstep(uFogNear, uFogFar, distance(cameraPosition, vWP));
-  gl_FragColor = vec4(mix(col, uFog, f), mix(uAlpha, 1.0, f));
+  gl_FragColor = vec4(mix(col, uFog, f), mix(min(1.0, uAlpha + 0.4 * clamp(foam, 0.0, 1.0)), 1.0, f));
 }`,
 };
 export const water = new Reflector(new THREE.PlaneGeometry(400, 400), { shader: WaterShader, textureWidth: 1024, textureHeight: 1024, clipBias: 0.003 });

@@ -4,6 +4,7 @@ import { VERTS, vAdj, vertexAt } from '../core/grid.js';
 import { blocks, has, keyOf, setBlocks } from '../core/model.js';
 import { houses } from '../plan/houses.js';
 import { lampSpot } from '../features/lamp.js';
+import { rippleClock, ripples } from '../fx/particles.js';
 import { spanOf } from '../features/span.js';
 import { WALK } from '../plan/analysis.js';
 import { PLAN } from '../plan/planner.js';
@@ -11,7 +12,7 @@ import { BRICK_GEO, MATS, brickMat, maskMat, roomDarkMat, roomLitMat } from '../
 import { bloom, gtao, renderFrame } from '../render/post.js';
 import { TIMES, applyTime, cur, toState } from '../render/time.js';
 import { camera, controls, renderer, water } from '../render/stage.js';
-import { pickMesh, ripple, townObj } from '../render/town.js';
+import { pickMesh, requestRegen, ripple, townObj } from '../render/town.js';
 
 // close-ups may come nearer than the player's zoom limit; the limit returns on the next wider view
 window.harbourView = (x, y, z, tx = 0, ty = 1, tz = 0) => {
@@ -82,6 +83,15 @@ window.harbourDev = {
     return v;
   },
   span: v => spanOf(v),
+  // place or remove one block exactly the way a click does, with its animation, splash and sound
+  place: (v, y = 0, c = '#e8a3a0') => { requestRegen({ v, y, erase: false }); commit(() => blocks.set(keyOf(v, y), { c })); },
+  remove: (v, y = 0) => { requestRegen({ v, y, erase: true }); commit(() => blocks.delete(keyOf(v, y))); },
+  // render a ripple from corner v frozen at a given age (seconds), for judging the water without timing luck
+  rippleAt: (v, age = 0.6, strength = 1) => {
+    if (v == null) { rippleClock.frozen = null; ripples.length = 0; return; }
+    rippleClock.frozen = 1000; ripples.length = 0;
+    ripples.push({ x: VERTS[v][0], z: VERTS[v][1], t: 1000 - age, s: strength }, { x: VERTS[v][0], z: VERTS[v][1], t: 1000 - age + 0.22, s: strength * 0.55 });
+  },
   // jump straight to a time of day (Day, Dusk, Night) without the transition
   time: name => { Object.assign(cur, toState(TIMES[name])); applyTime(); },
   // How dark and harsh the picture is, read back from the rendered frame at fixed camera views (the

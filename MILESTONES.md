@@ -178,6 +178,14 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       awning's colour, with a gilded emblem (a loaf, a fish or a bottle) that reads from along the street.
       Dev helpers: `harbourDev.find(kind)` lists where a feature went, and `harbourDev.look(kind, i)` frames it.
 
+- [x] **D3 Water that answers** — a street dropped into the harbour throws up a ring of droplets from
+      its edge that arc and fall back, and sends a train of ripples out through the water itself (in the
+      water shader, up to eight at once). The crests bend the reflection, catch the light, and carry a
+      torn band of foam, with a fainter line on the crest behind. The waves stretch out as they travel and
+      fade over three seconds. Removing a street lets the water close in with a smaller splash. The flat
+      white rings and the dust puffs on water are gone. `harbourDev.rippleAt(v, age)` freezes a ripple for
+      inspection, and `place(v, y)` / `remove(v, y)` act exactly like clicks.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 

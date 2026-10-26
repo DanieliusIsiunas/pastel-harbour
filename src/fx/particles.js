@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { GROUND, WATER } from '../core/dims.js';
 import { reduceMotion } from '../core/env.js';
 import { VERTS } from '../core/grid.js';
-import { scene } from '../render/stage.js';
+import { scene, water } from '../render/stage.js';
 
-// ---------- effects: dust, sparkles and water rings ----------
+// ---------- effects: dust, sparkles, splashes and ripples ----------
 export const FX_N = 500;
 export const fxPos = new Float32Array(FX_N * 3), fxCol = new Float32Array(FX_N * 3), fxSize = new Float32Array(FX_N), fxAlpha = new Float32Array(FX_N);
 export const fxState = Array.from({ length: FX_N }, () => ({ life: 0, max: 1, vx: 0, vy: 0, vz: 0, kind: 0, size: 0.1, ph: 0 }));
@@ -43,12 +43,27 @@ export function sparkleAt(x, y, z, n) {
     spawn(1, x + Math.cos(a) * r, y + Math.random() * 0.2, z + Math.sin(a) * r, Math.cos(a) * 0.15, 0.5 + Math.random() * 0.6, Math.sin(a) * 0.15, 0.7 + Math.random() * 0.5, 0.06 + Math.random() * 0.04, Math.random() < 0.6 ? '#ffd98a' : '#fff6dc');
   }
 }
-// the burst that greets each click: a dust ring, rising sparkles, and rings on the water for streets
+// a street dropped into the harbour throws up a ring of droplets from its edge; they arc and fall back
+function splash(x, z, n, up) {
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * 6.28 + Math.random() * 0.4, r = 0.45 + Math.random() * 0.2, sp = 0.35 + Math.random() * 0.55;
+    spawn(2, x + Math.cos(a) * r, WATER + 0.04, z + Math.sin(a) * r, Math.cos(a) * sp, up * (0.9 + Math.random() * 0.9), Math.sin(a) * sp,
+      0.9, 0.045 + Math.random() * 0.035, Math.random() < 0.7 ? '#f4fbfd' : '#cfe8ee');
+  }
+}
+// the burst that greets each click: a dust ring and rising sparkles; on the water, a splash and ripples
 export function burst(rg) {
   if (reduceMotion) return;
   const [x, z] = VERTS[rg.v], y = rg.y === 0 ? GROUND : rg.y;
+  if (rg.y === 0) {
+    // water: a street lands with a splash and sends ripples out; a removed one lets the water close in
+    addRipple(x, z, 0, rg.erase ? 0.7 : 1);
+    addRipple(x, z, 0.22, rg.erase ? 0.35 : 0.55);
+    splash(x, z, rg.erase ? 14 : 26, rg.erase ? 0.8 : 1.35);
+  }
   const dust = rg.erase ? '#e6ddd0' : '#f6f0e4';
-  const n = rg.erase ? 26 : 18;
+  // a street on the water raises spray, not dust
+  const n = rg.y === 0 ? 0 : rg.erase ? 26 : 18;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * 6.28 + Math.random() * 0.3, sp = 0.6 + Math.random() * 0.6;
     const yy = rg.erase ? y + Math.random() * 0.8 : y + 0.04;
@@ -60,20 +75,20 @@ export function burst(rg) {
       spawn(1, x + Math.cos(a) * r, y + Math.random() * 0.9, z + Math.sin(a) * r, Math.cos(a) * 0.25, 0.7 + Math.random() * 0.9, Math.sin(a) * 0.25, 0.8 + Math.random() * 0.6, 0.06 + Math.random() * 0.05, Math.random() < 0.65 ? '#ffd98a' : '#fff6dc');
     }
   }
-  if (rg.y === 0) { waterRing(x, z, 0); waterRing(x, z, 0.16); }
 }
-export const rings = [];
-export const ringGeo = new THREE.RingGeometry(0.92, 1, 64).rotateX(-Math.PI / 2);
-export function waterRing(x, z, delay) {
-  const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false }));
-  m.position.set(x, WATER + 0.02, z);
-  m.renderOrder = 2;
-  scene.add(m);
-  rings.push({ m, start: performance.now() + delay * 1000 });
+// ripples live in the water shader: up to eight at once, each (x, z, start time, strength)
+export const ripples = [];
+// dev only: hold the ripple clock at a fixed time so a frame can be judged at an exact moment
+export const rippleClock = { frozen: null };
+export function addRipple(x, z, delay, strength) {
+  ripples.push({ x, z, t: performance.now() / 1000 + delay, s: strength });
+  if (ripples.length > 8) ripples.shift();
 }
 export let fxIdle = false;
 export function updateFx(dt, t) {
-  if (fxIdle && !rings.length) return;
+  const nowS = rippleClock.frozen ?? performance.now() / 1000;
+  water.material.uniforms.uNow.value = nowS;
+  if (fxIdle && !ripples.length) return;
   let alive = 0;
   for (let i = 0; i < FX_N; i++) {
     const st = fxState[i];
@@ -85,6 +100,12 @@ export function updateFx(dt, t) {
       st.vx *= 0.9; st.vz *= 0.9; st.vy = st.vy * 0.94 + 0.02;
       fxAlpha[i] = 0.5 * Math.pow(1 - p, 1.6);
       fxSize[i] = st.size * (1 + p * 1.8);
+    } else if (st.kind === 2) {
+      // a droplet: thrown up, pulled down, gone when it meets the water again
+      st.vy -= 6.5 * dt;
+      fxAlpha[i] = 0.9 * Math.min(1, (1 - p) * 3);
+      fxSize[i] = st.size;
+      if (fxPos[i * 3 + 1] < WATER && st.vy < 0) st.life = st.max;
     } else {
       st.vx *= 0.97; st.vz *= 0.97; st.vy *= 0.96;
       fxAlpha[i] = (1 - p) * (0.55 + 0.45 * Math.sin(st.life * 26 + st.ph));
@@ -97,13 +118,10 @@ export function updateFx(dt, t) {
   fxGeo.attributes.alpha.needsUpdate = true;
   fxGeo.attributes.fxColor.needsUpdate = true;
   fxIdle = alive === 0;
-  const now = performance.now();
-  for (let i = rings.length - 1; i >= 0; i--) {
-    const r = rings[i], p = (now - r.start) / 1100;
-    if (p < 0) continue;
-    if (p >= 1) { scene.remove(r.m); r.m.material.dispose(); rings.splice(i, 1); continue; }
-    const e = 1 - Math.pow(1 - p, 3);
-    r.m.scale.setScalar(0.45 + e * 1.9);
-    r.m.material.opacity = 0.55 * (1 - p);
+  while (ripples.length && nowS - ripples[0].t > 3.2) ripples.shift();
+  const U = water.material.uniforms.uRip.value;
+  for (let i = 0; i < 8; i++) {
+    const r = ripples[i];
+    if (r) U[i].set(r.x, r.z, r.t, r.s); else U[i].set(0, 0, -99, 0);
   }
 }

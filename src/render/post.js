@@ -6,7 +6,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { lowPower } from '../core/env.js';
-import { fxMat, rings } from '../fx/particles.js';
+import { fxMat } from '../fx/particles.js';
 import { WINFX } from './materials.js';
 import { camera, renderer, scene, sun } from './stage.js';
 
