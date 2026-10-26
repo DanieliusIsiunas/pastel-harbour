@@ -1,0 +1,25 @@
+name: CI
+
+# The same gate as `npm run check`: lint, tests (fixtures, planner rules, registry, performance budget)
+# and the production build, on every push and pull request.
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+        env:
+          # shared runners are slower and noisier than a laptop; the time budget gets twice the room there
+          PERF_BUDGET_SCALE: '2'
+      - run: npm run build

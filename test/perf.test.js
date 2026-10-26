@@ -5,7 +5,8 @@ import { SCENES } from '../fixtures/scenes.js';
 // Budgets for the default 406-block town. Planning and emitting all geometry runs on every click, so it
 // must stay fast; triangle and brick counts guard against a feature that quietly multiplies geometry.
 // Raise a budget only on purpose, with the reason in the commit.
-const BUDGET = { emitMs: 200, mainTris: 380000, bricks: 20000, pickTris: 14000 };
+// (PERF_BUDGET_SCALE widens the time budget on slower machines such as CI runners; the geometry caps don't move)
+const BUDGET = { emitMs: 200 * Number(process.env.PERF_BUDGET_SCALE || 1), mainTris: 380000, bricks: 20000, pickTris: 14000 };
 
 describe('performance budget (townA)', () => {
   it(`plans and emits the town in under ${BUDGET.emitMs} ms`, () => {
