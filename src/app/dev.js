@@ -13,9 +13,11 @@ import { bloom, gtao, renderFrame } from '../render/post.js';
 import { TIMES, applyTime, cur, toState } from '../render/time.js';
 import { camera, controls, renderer, water } from '../render/stage.js';
 import { pickMesh, requestRegen, ripple, townObj } from '../render/town.js';
+import { cameraState, setManualCamera } from '../render/director.js';
 
 // close-ups may come nearer than the player's zoom limit; the limit returns on the next wider view
 window.harbourView = (x, y, z, tx = 0, ty = 1, tz = 0) => {
+  setManualCamera(true);
   camera.position.set(x, y, z); controls.target.set(tx, ty, tz);
   controls.minDistance = Math.min(5, camera.position.distanceTo(controls.target) * 0.95);
   controls.update(); camera.updateMatrixWorld();
@@ -92,6 +94,9 @@ window.harbourDev = {
     rippleClock.frozen = 1000; ripples.length = 0;
     ripples.push({ x: VERTS[v][0], z: VERTS[v][1], t: 1000 - age, s: strength }, { x: VERTS[v][0], z: VERTS[v][1], t: 1000 - age + 0.22, s: strength * 0.55 });
   },
+  // hand the camera back to the director after harbourView, and report what it is doing
+  auto: () => setManualCamera(false),
+  camera: () => cameraState(),
   // jump straight to a time of day (Day, Dusk, Night) without the transition
   time: name => { Object.assign(cur, toState(TIMES[name])); applyTime(); },
   // How dark and harsh the picture is, read back from the rendered frame at fixed camera views (the

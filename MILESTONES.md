@@ -186,6 +186,23 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       white rings and the dust puffs on water are gone. `harbourDev.rippleAt(v, age)` freezes a ripple for
       inspection, and `place(v, y)` / `remove(v, y)` act exactly like clicks.
 
+- [x] **C1 Camera director** — the camera frames the town the way Townscaper's does. An empty
+      harbour starts close, and every build re-fits the view. Framing projects the town's silhouette
+      (each column's footprint corners at the waterline and at the roof) into the current view and solves
+      the distance at which all of it lands on screen, so a wide, low town fills a landscape screen and a
+      phone in portrait still sees the full width. The camera eases out quickly when the town grows
+      (pieces never leave the screen) and eases back in slowly when it shrinks; small changes are
+      ignored. Above all the camera holds still: building inside the view moves nothing. It steps back
+      only when the town no longer fits (with 12% headroom, so the next pieces don't move it again), and
+      comes in only once the town needs under 70% of the view. The same rule runs after an orbit ends,
+      never during one. The eye sits about 24° above the horizon, and the town fills about 80% of the
+      width and 70% of the height. The player stays in charge: orbiting is untouched, zooming zooms
+      toward the cursor and is kept as a multiplier on the framing, and panning is kept as an offset.
+      When zoomed in on a corner, the camera stays there and follows a new piece that lands near the
+      screen edge. Measured: the framing distance goes from 6.6 (empty) to 9.2
+      (six streets) to 13.3 (a five-storey tower) to 30 (a 406-block town, 1280×800). `harbourDev.camera()`
+      reports the framing, and `harbourDev.auto()` hands the camera back after `harbourView`.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 

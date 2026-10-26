@@ -13,6 +13,7 @@ import { emitCourtyard, isCourtyard } from '../geom/ground.js';
 import { resetCaches } from '../geom/rules.js';
 import { computeHouses } from '../plan/houses.js';
 import { planScene } from '../plan/planner.js';
+import { frameTown } from './director.js';
 import { BRICK_GEO, MATS, WINFX, brickMat, mainMat, treeGeo, treeMat } from './materials.js';
 import { markShadows, scene } from './stage.js';
 import { updateVoxels } from './voxels.js';
@@ -117,6 +118,7 @@ export let MB = null;
 export let pickMeta = [];
 export function requestRegen(r) { regen = r; }
 export function rebuild() {
+  const focus = regen;
   disposeGroup(townObj); scene.remove(townObj);
   clearRipple();
   const regions = new Map();
@@ -194,6 +196,7 @@ export function rebuild() {
     scene.add(pickMesh);
   }
   document.getElementById('count').textContent = blocks.size + (blocks.size === 1 ? ' block' : ' blocks');
+  frameTown(focus);
 }
 
 // per-frame spring animation of the pieces a click changed; bakes the town when they settle

@@ -26,7 +26,7 @@ export const scene = new THREE.Scene();
 scene.fog = new THREE.Fog('#86b1b8', 45, 150);
 
 export const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 800);
-camera.position.set(24, 24, 30);
+camera.position.set(24, 18.5, 30);   // about 24° above the horizon: a passer-by's view, not a map's
 export const controls = new OrbitControls(camera, canvas);
 controls.target.set(0, 2, 1);
 controls.enableDamping = true;
