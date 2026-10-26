@@ -1,6 +1,6 @@
 import { EDGE, GROUND, GROUND_ROUND, WATER } from '../core/dims.js';
 import { UVM, VERTS, cells, nx4, pv4, vAdj, vCells, xz } from '../core/grid.js';
-import { has, keyOf } from '../core/model.js';
+import { has } from '../core/model.js';
 import { C, IRON, LEAVES, PALETTE, PAVERS } from '../core/palette.js';
 import { P3, hash, l2, lin, norm2, outward, shade, sub2 } from '../core/util.js';
 import { blob, boxAt, face, hexa, pickQuad, pickTri, wb } from './builder.js';
@@ -13,15 +13,16 @@ export function emitGroundCell(bld, ci) {
   const cell = cells[ci], vv = cell.v;
   const f = vv.map(v => has(v, 0));
   if (!f.some(Boolean)) return;
-  const C = xz(cell, 0.5, 0.5), Mp = UVM.map(m => xz(cell, m[0], m[1])), Vp = cell.q;
-  const Qc = [0, 1, 2, 3].map(q => [(Vp[q][0] + Mp[q][0] + C[0] + Mp[pv4(q)][0]) / 4, (Vp[q][1] + Mp[q][1] + C[1] + Mp[pv4(q)][1]) / 4]);
+  const Cm = xz(cell, 0.5, 0.5), Mp = UVM.map(m => xz(cell, m[0], m[1])), Vp = cell.q;
+  const Qc = [0, 1, 2, 3].map(q => [(Vp[q][0] + Mp[q][0] + Cm[0] + Mp[pv4(q)][0]) / 4, (Vp[q][1] + Mp[q][1] + Cm[1] + Mp[pv4(q)][1]) / 4]);
   const all4 = f.every(Boolean);
   const convex = q => f[q] && !f[nx4(q)] && !f[pv4(q)];
   const wallAt = k => f[k] !== f[nx4(k)];
   const trimmed = k => convex(k) || convex(nx4(k));
-  let cm = [0, 0], first = null;
+  const cm = [0, 0];
+  let first = null;
   for (let k = 0; k < 4; k++) if (wallAt(k) && !trimmed(k)) {
-    const n = outward(Mp[k], C, Qc[f[k] ? k : nx4(k)]);
+    const n = outward(Mp[k], Cm, Qc[f[k] ? k : nx4(k)]);
     cm[0] += n[0]; cm[1] += n[1]; first = first || n;
   }
   const cmu = norm2(cm), cmag = first ? 1 / Math.max(0.55, cmu[0] * first[0] + cmu[1] * first[1]) : 0;
@@ -35,16 +36,16 @@ export function emitGroundCell(bld, ci) {
   const grout = lin('#c2b8a6'), stone = lin(C.stone), curb = lin('#b04f3e');
   for (let q = 0; q < 4; q++) {
     if (!f[q]) continue;
-    const v = vv[q], key = keyOf(v, 0), Vq = Vp[q];
+    const v = vv[q], Vq = Vp[q];
     const R = [mInfo(q)];
     if (convex(q)) {
-      const A = l2(C, Mp[q], GROUND_ROUND), B = l2(C, Mp[pv4(q)], GROUND_ROUND), N = 6, pts = [];
+      const A = l2(Cm, Mp[q], GROUND_ROUND), B = l2(Cm, Mp[pv4(q)], GROUND_ROUND), N = 6, pts = [];
       for (let i = 0; i <= N; i++) {
         const t = i / N, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
-        pts.push([a * A[0] + b * C[0] + c * B[0], a * A[1] + b * C[1] + c * B[1]]);
+        pts.push([a * A[0] + b * Cm[0] + c * B[0], a * A[1] + b * Cm[1] + c * B[1]]);
       }
       for (let i = 0; i <= N; i++) R.push({ p: pts[i], e: true, cv: true, off: outward(pts[Math.max(0, i - 1)], pts[Math.min(N, i + 1)], Qc[q]) });
-    } else R.push({ p: C, e: !all4, off: cOff });
+    } else R.push({ p: Cm, e: !all4, off: cOff });
     R.push(mInfo(pv4(q)));
     const pt = (r, o = EDGE) => r.e ? [r.p[0] + r.off[0] * o, r.p[1] + r.off[1] * o] : r.p;
     for (let i = 0; i < R.length - 1; i++) {
@@ -76,7 +77,7 @@ export function emitGroundCell(bld, ci) {
     }
     if (has(v, 1) || isCourtyard(v)) continue;
     // cobbled paving: a 3x3 grid of slightly irregular stones over the grout
-    const A = Vq, B = Mp[q], Cc = C, D = Mp[pv4(q)];
+    const A = Vq, B = Mp[q], Cc = Cm, D = Mp[pv4(q)];
     const P = (u, w) => [A[0] * (1 - u) * (1 - w) + B[0] * u * (1 - w) + Cc[0] * u * w + D[0] * (1 - u) * w,
                          A[1] * (1 - u) * (1 - w) + B[1] * u * (1 - w) + Cc[1] * u * w + D[1] * (1 - u) * w];
     const n = 3, g = 0.05;

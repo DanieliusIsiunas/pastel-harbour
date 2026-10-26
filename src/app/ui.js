@@ -1,7 +1,7 @@
 import { commit, redo, undo } from './history.js';
 import { updateGhost } from './input.js';
 import { colorForPlacement, resetGhost } from './picking.js';
-import { sampleTown } from './sample.js';
+import { sampleTown } from '../core/sample.js';
 import { S } from './state.js';
 import { blocks, setBlocks } from '../core/model.js';
 import { PALETTE } from '../core/palette.js';

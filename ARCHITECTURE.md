@@ -57,13 +57,16 @@ fixture scenes produce the same geometry digest as before the restructuring, and
 - **Grid versions:** `GRID_VERSION` in `core/palette.js` names the grid generator. Saves record it, and
   `app/history.js` moves a town saved on an older grid to the current one by position. Changing grid
   generation means bumping the version and re-recording `fixtures/baseline.json`.
-- **Still pending from 2:** geometry still imports three (colours via `lin`, `THREE.Color` in walls),
-  so Node tests need a small shim or that dependency moved to `render/`.
+- **Pure core (change 2): done.** `src/geom/town.js` plans and emits the whole town as plain data. The
+  renderer turns it into meshes, and tests run it in Node. ESLint stops core, plan, features and geom from
+  importing render, fx or app.
+- **Quality gates (part of 6): done.** `npm run check` runs lint, tests and the build; a pre-commit hook
+  runs lint and tests. The tests cover fixture digests, planner rules on fixtures and 8 generated towns,
+  registry completeness and a performance budget. Visual regression with Playwright is still to do.
 
 Workflow: `npm run dev` (hot reload at http://localhost:5173), `npm run build` (writes
 `dist/index.html` and `dist/artifact.html`, the single file published as the artifact). To check that a
-refactor moved nothing, in the dev page's console run each scene from `fixtures/scenes.js` against
-`harbourDev`, then compare `harbourDev.digest()` with `fixtures/baseline.json`.
+refactor moved nothing, run `npm test`; the fixture digests are computed in Node by `fixtures/driver.js`.
 
 ## The six changes, most impactful first
 

@@ -1,6 +1,6 @@
 import { load, refreshHistoryButtons } from './history.js';
 import { animateGhost } from './picking.js';
-import { sampleTown } from './sample.js';
+import { sampleTown } from '../core/sample.js';
 import { busy } from '../core/env.js';
 import { setBlocks } from '../core/model.js';
 import { animateLife } from '../fx/life.js';
@@ -17,7 +17,6 @@ import './ui.js';
 import './input.js';
 import './dev.js';
 
-let frame = 0;
 function tick(now) {
   const t = now / 1000;
   updateTime(now);
@@ -27,7 +26,7 @@ function tick(now) {
   const dt = Math.min(0.05, (now - (tick.last || now)) / 1000);
   tick.last = now;
   animateRipple(now, dt);
-  updateFx(dt, t);
+  updateFx(dt);
   animateGhost(dt, t);
   busy.anim = ripple.length > 0 || timeBusy();
   controls.update();
@@ -35,7 +34,6 @@ function tick(now) {
   sun.target.position.set(0, 0, 0);
   if (consumeShadows() || busy.anim) renderer.shadowMap.needsUpdate = true;
   renderFrame(cur.sunI);
-  frame++;
   requestAnimationFrame(tick);
 }
 

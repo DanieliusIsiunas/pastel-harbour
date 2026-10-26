@@ -26,7 +26,7 @@ float voxAO(vec3 wp, vec3 n) {
 }`;
 export function updateVoxels() {
   const { res, ox, oy, oz, nx, ny, nz } = VOX, idx = (i, j, k) => i + nx * (j + ny * k);
-  let a = new Float32Array(nx * ny * nz), b = new Float32Array(nx * ny * nz);
+  const a = new Float32Array(nx * ny * nz), b = new Float32Array(nx * ny * nz);
   for (const key of blocks.keys()) {
     const [v, y] = parseKey(key), [x, z] = VERTS[v];
     const y0 = y === 0 ? WATER - 0.3 : y, y1 = y === 0 ? GROUND : y + 1 + (has(v, y + 1) ? 0 : 0.3), r = 0.62;
@@ -49,8 +49,8 @@ export function updateVoxels() {
       else if (dim === 1) base = (l % nx) + Math.floor(l / nx) * nx * ny;
       else base = l;
       for (let t = 0; t < n; t++) {
-        let sum = 0, cnt = 0;
-        for (let q = -2; q <= 2; q++) { const u = t + q; if (u >= 0 && u < n) { sum += src[base + u * step]; cnt++; } }
+        let sum = 0;
+        for (let q = -2; q <= 2; q++) { const u = t + q; if (u >= 0 && u < n) sum += src[base + u * step]; }
         dst[base + t * step] = sum / 5;
       }
     }

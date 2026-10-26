@@ -85,7 +85,7 @@ export function addRipple(x, z, delay, strength) {
   if (ripples.length > 8) ripples.shift();
 }
 export let fxIdle = false;
-export function updateFx(dt, t) {
+export function updateFx(dt) {
   const nowS = rippleClock.frozen ?? performance.now() / 1000;
   water.material.uniforms.uNow.value = nowS;
   if (fxIdle && !ripples.length) return;

@@ -1,8 +1,7 @@
-import { pick } from './picking.js';
-import { VERTS, vAdj, vFixed, vertexAt } from '../core/grid.js';
-import { keyOf } from '../core/model.js';
-import { PALETTE } from '../core/palette.js';
-import { mulberry32 } from '../core/util.js';
+import { VERTS, vAdj, vFixed, vertexAt } from './grid.js';
+import { keyOf } from './model.js';
+import { PALETTE } from './palette.js';
+import { mulberry32 } from './util.js';
 
 // ---------- sample town ----------
 export function graphPath(a, b) {
@@ -44,7 +43,7 @@ export function sampleTown(seed) {
     }
   }
   for (const [v, H] of heightOf) {
-    let c = pick();
+    const c = pick();
     for (let y = 1; y <= H; y++) m.set(keyOf(v, y), { c });
   }
   // arcades over a few lanes: an upper floor bridging the street between two houses

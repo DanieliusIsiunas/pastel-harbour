@@ -119,7 +119,7 @@ export const vAdj = VERTS.map(() => []);
 for (const [a, b] of GRID.edges) { vAdj[a].push(b); vAdj[b].push(a); }
 export const vCells = VERTS.map(() => []);
 cells.forEach((c, ci) => c.v.forEach((v, k) => vCells[v].push([ci, k])));
-export const vFixed = VERTS.map(v => 0);
+export const vFixed = VERTS.map(() => 0);
 for (const [a, b] of GRID.edges) {
   // an edge used by a single cell lies on the outer boundary
   const shared = vCells[a].filter(([ci]) => vCells[b].some(([cj]) => cj === ci)).length;

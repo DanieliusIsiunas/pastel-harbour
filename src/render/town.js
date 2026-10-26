@@ -1,18 +1,14 @@
 import * as THREE from 'three';
 import { WATER } from '../core/dims.js';
 import { reduceMotion } from '../core/env.js';
-import { VERTS, cells, vCells } from '../core/grid.js';
-import { blocks, parseKey } from '../core/model.js';
+import { VERTS, cells } from '../core/grid.js';
+import { blocks } from '../core/model.js';
 import { C } from '../core/palette.js';
 import { hash } from '../core/util.js';
 import { burst, sparkleAt } from '../fx/particles.js';
 import { pluck } from '../fx/sound.js';
-import { BRICK_STRIDE, makeBuilder, newMesh } from '../geom/builder.js';
-import { emitCellLevel } from '../geom/buildings.js';
-import { emitCourtyard, isCourtyard } from '../geom/ground.js';
-import { resetCaches } from '../geom/rules.js';
-import { computeHouses } from '../plan/houses.js';
-import { planScene } from '../plan/planner.js';
+import { BRICK_STRIDE, newMesh } from '../geom/builder.js';
+import { appendMesh, emitTown, sigOf } from '../geom/town.js';
 import { frameTown } from './director.js';
 import { BRICK_GEO, MATS, WINFX, brickMat, mainMat, treeGeo, treeMat } from './materials.js';
 import { markShadows, scene } from './stage.js';
@@ -75,24 +71,6 @@ export const pickMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, col
 // Every cell-level chunk keeps a signature of its geometry. After a click, the chunks whose
 // signature changed animate in a ripple spreading out from the click, then the town is baked again.
 export let prevSigs = new Map(), regen = null, ripple = [];
-export function sigOf(m) {
-  let s = 0, n = 0;
-  for (const k in m) {
-    const p = m[k].p, c = m[k].c, q = m[k].inst;
-    n += p.length + q.length;
-    for (let i = 0; i < p.length; i++) s = (s * 1.0000037 + p[i] * (i % 13 + 1) + c[i] * 7.1) % 1e7;
-    for (let i = 0; i < q.length; i++) s = (s * 1.0000041 + q[i] * (i % 11 + 1)) % 1e7;
-  }
-  return n + ':' + s.toFixed(3);
-}
-export function appendMesh(dst, src) {
-  for (const k in src) {
-    const a = dst[k], b = src[k];
-    for (let i = 0; i < b.p.length; i++) { a.p.push(b.p[i]); a.c.push(b.c[i]); }
-    for (let i = 0; i < b.k.length; i++) a.k.push(b.k[i]);
-    for (let i = 0; i < b.inst.length; i++) a.inst.push(b.inst[i]);
-  }
-}
 export function clearRipple() {
   for (const r of ripple) { disposeGroup(r.obj); scene.remove(r.obj); for (const m of r.mats) m.dispose(); }
   ripple = [];
@@ -113,7 +91,6 @@ export function glowCopy(obj) {
   return mats;
 }
 
-export let MB = null;
 // the pick triangles' metadata from the last rebuild, read by the click handler
 export let pickMeta = [];
 export function requestRegen(r) { regen = r; }
@@ -127,28 +104,17 @@ export function rebuild() {
     if (!regions.has(key)) regions.set(key, newMesh());
     return regions.get(key);
   };
-  MB = newMesh();
   const now = performance.now(), sigs = new Map(), changed = [];
-  resetCaches();
-  computeHouses();
-  planScene();
+  const town = emitTown(), { pick, trees } = town;
   updateVoxels();
-  const pick = { P: [], meta: [] };
-  const trees = [], todo = new Set();
-  for (const k of blocks.keys()) {
-    const [v, y] = parseKey(k);
-    for (const [ci] of vCells[v]) todo.add(ci * 64 + y);
-  }
-  for (const code of todo) {
-    const m = newMesh();
-    emitCellLevel(makeBuilder(m, pick), Math.floor(code / 64), code % 64);
+  for (const [code, m] of town.chunks) {
     const sig = sigOf(m);
     sigs.set(code, sig);
     if (regen && prevSigs.size && prevSigs.get(code) !== sig) changed.push({ ci: Math.floor(code / 64), y: code % 64, m });
     else { const c = cells[Math.floor(code / 64)].c; appendMesh(regionOf(c[0], c[1]), m); }
   }
   prevSigs = sigs;
-  for (let v = 0; v < VERTS.length; v++) if (isCourtyard(v)) emitCourtyard(makeBuilder(regionOf(VERTS[v][0], VERTS[v][1]), pick), v, trees);
+  for (const [v, m] of town.courtyards) appendMesh(regionOf(VERTS[v][0], VERTS[v][1]), m);
   townObj = new THREE.Group();
   for (const m of regions.values()) townObj.add(meshesFrom(m));
   markShadows();

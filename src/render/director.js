@@ -31,7 +31,8 @@ controls.zoomToCursor = true;
 // its roof (spire tips included). Framing projects these into the current view and solves for the
 // distance at which every point lands inside the screen, so a wide, low town fills a landscape screen and
 // a portrait phone still sees its full width.
-let PTS = [], BASE = new THREE.Vector3();
+let PTS = [];
+const BASE = new THREE.Vector3();
 function silhouette() {
   const cols = new Map();
   for (const k of blocks.keys()) { const [v, y] = parseKey(k); cols.set(v, Math.max(cols.get(v) ?? -1, y)); }

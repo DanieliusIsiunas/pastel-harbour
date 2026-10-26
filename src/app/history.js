@@ -4,7 +4,8 @@ import { GRID_SEED, GRID_VERSION, HEX_N, TRI_SIDE } from '../core/palette.js';
 import { pluck } from '../fx/sound.js';
 import { rebuild } from '../render/town.js';
 
-export let undoStack = [], redoStack = [];
+export const undoStack = [];
+export let redoStack = [];
 export function refreshHistoryButtons() {
   document.getElementById('undo').disabled = undoStack.length === 0;
   document.getElementById('redo').disabled = redoStack.length === 0;

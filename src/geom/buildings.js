@@ -21,33 +21,33 @@ export function emitCellLevel(bld, ci, y) {
   if (!f.some(Boolean)) return;
   const sup = vv.map(v => has(v, y - 1));
   const fa = vv.map(v => has(v, y + 1));
-  const C = xz(cell, 0.5, 0.5), Mp = UVM.map(m => xz(cell, m[0], m[1])), Vp = cell.q;
-  const Qc = [0, 1, 2, 3].map(q => [(Vp[q][0] + Mp[q][0] + C[0] + Mp[pv4(q)][0]) / 4, (Vp[q][1] + Mp[q][1] + C[1] + Mp[pv4(q)][1]) / 4]);
+  const Cm = xz(cell, 0.5, 0.5), Mp = UVM.map(m => xz(cell, m[0], m[1])), Vp = cell.q;
+  const Qc = [0, 1, 2, 3].map(q => [(Vp[q][0] + Mp[q][0] + Cm[0] + Mp[pv4(q)][0]) / 4, (Vp[q][1] + Mp[q][1] + Cm[1] + Mp[pv4(q)][1]) / 4]);
   const all4 = f.every(Boolean);
   const convex = q => f[q] && !f[nx4(q)] && !f[pv4(q)];
   const wallAt = k => f[k] !== f[nx4(k)];
   const rc = q => roundOf(vv[q], y);
-  const trimP = k => convex(k) ? l2(C, Mp[k], rc(k)) : convex(nx4(k)) ? l2(C, Mp[k], rc(nx4(k))) : C;
+  const trimP = k => convex(k) ? l2(Cm, Mp[k], rc(k)) : convex(nx4(k)) ? l2(Cm, Mp[k], rc(nx4(k))) : Cm;
 
   // walls: straight half-walls on the cell's midlines, plus rounded corners
   const segs = [];
   for (let k = 0; k < 4; k++) if (wallAt(k)) {
     const own = f[k] ? k : nx4(k), a = Mp[k], b = trimP(k);
-    segs.push({ a, b, own, k, curve: false, c0: C, n: outward(a, b, Qc[own]) });
+    segs.push({ a, b, own, k, curve: false, c0: Cm, n: outward(a, b, Qc[own]) });
   }
   const curves = {};
   for (let q = 0; q < 4; q++) if (convex(q)) {
-    const A = l2(C, Mp[q], rc(q)), B = l2(C, Mp[pv4(q)], rc(q)), pts = [], N = 6;
+    const A = l2(Cm, Mp[q], rc(q)), B = l2(Cm, Mp[pv4(q)], rc(q)), pts = [], N = 6;
     for (let i = 0; i <= N; i++) {
       const t = i / N, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
-      pts.push([a * A[0] + b * C[0] + c * B[0], a * A[1] + b * C[1] + c * B[1]]);
+      pts.push([a * A[0] + b * Cm[0] + c * B[0], a * A[1] + b * Cm[1] + c * B[1]]);
     }
     curves[q] = pts;
     for (let i = 0; i < N; i++) segs.push({ a: pts[i], b: pts[i + 1], own: q, curve: true, n: outward(pts[i], pts[i + 1], Qc[q]) });
   }
   // eave/quay offset at the cell centre: mitre of the straight walls meeting there
-  let cm = [0, 0];
-  const straight = segs.filter(s => !s.curve && s.b === C);
+  const cm = [0, 0];
+  const straight = segs.filter(s => !s.curve && s.b === Cm);
   for (const s of straight) { cm[0] += s.n[0]; cm[1] += s.n[1]; }
   const cmu = norm2(cm);
   const cmag = straight.length ? 1 / Math.max(0.55, cmu[0] * straight[0].n[0] + cmu[1] * straight[0].n[1]) : 0;
@@ -64,7 +64,7 @@ export function emitCellLevel(bld, ci, y) {
     if (curves[q]) {
       const pts = curves[q];
       for (let i = 0; i < pts.length; i++) R.push({ p: pts[i], e: true, cv: true, off: outward(pts[Math.max(0, i - 1)], pts[Math.min(pts.length - 1, i + 1)], Qc[q]) });
-    } else R.push({ p: C, e: !all4, off: cOff });
+    } else R.push({ p: Cm, e: !all4, off: cOff });
     R.push(gab(mInfo(pv4(q)), q, vv[pv4(q)]));
     return R;
   };
@@ -95,11 +95,11 @@ export function emitCellLevel(bld, ci, y) {
     pickQuad(bld, P3(s.a, y), P3(s.b, y), P3(s.b, y + 1), P3(s.a, y + 1), { v, y, t: 'side', cands });
   }
   // a drainpipe marks the seam where two different houses meet along one straight facade
-  const meet = segs.filter(sg => !sg.curve && sg.b === C);
+  const meet = segs.filter(sg => !sg.curve && sg.b === Cm);
   if (meet.length === 2 && meet.every(sg => sup[sg.own])) {
     const [s1, s2] = meet, va = vv[s1.own], vb = vv[s2.own];
     if (houseOf(va) !== houseOf(vb) && blocks.get(keyOf(va, y)).c !== blocks.get(keyOf(vb, y)).c) {
-      const p = [C[0] + cOff[0] * 0.035, C[1] + cOff[1] * 0.035], pipe = lin('#69727b');
+      const p = [Cm[0] + cOff[0] * 0.035, Cm[1] + cOff[1] * 0.035], pipe = lin('#69727b');
       const y0 = onStreet(va, y) ? y : y - 0.02, topLevel = !has(va, y + 1) && !has(vb, y + 1);
       boxAt(bld, p[0], p[1], 0.018, y0, y + (topLevel ? 0.86 : 1), pipe);
       for (const yy of [y + 0.3, y + 0.75]) boxAt(bld, p[0], p[1], 0.026, yy, yy + 0.03, pipe);
@@ -111,16 +111,16 @@ export function emitCellLevel(bld, ci, y) {
   for (let k = 0; k < 4; k++) {
     if (!f[k] || !f[nx4(k)] || sup[k] === sup[nx4(k)]) continue;
     const own = sup[k] ? k : nx4(k), v = vv[own], key = keyOf(v, y);
-    const n = outward(Mp[k], C, Qc[own]), col = lin(blocks.get(key).c, toneOf(v, y) * 0.9);
-    const mid = l2(Mp[k], C, 0.5);
-    bld.kind = 1; face(bld, 'main', [P3(Mp[k], y - 0.06), P3(C, y - 0.06), P3(C, y + ARCH), P3(Mp[k], y + ARCH)], col, [mid[0] - n[0], y + 0.3, mid[1] - n[1]]); bld.kind = 0;
+    const n = outward(Mp[k], Cm, Qc[own]), col = lin(blocks.get(key).c, toneOf(v, y) * 0.9);
+    const mid = l2(Mp[k], Cm, 0.5);
+    bld.kind = 1; face(bld, 'main', [P3(Mp[k], y - 0.06), P3(Cm, y - 0.06), P3(Cm, y + ARCH), P3(Mp[k], y + ARCH)], col, [mid[0] - n[0], y + 0.3, mid[1] - n[1]]); bld.kind = 0;
   }
 }
 
 // ---------- N4: stilts, quoins, drainpipes ----------
 // A floor that overhangs open water by a storey or more stands on an iron frame instead of arches
 // (about half the houses prefer it), the way Townscaper props up hanging corners with steel legs.
-export function emitStilts(bld, F, s, y, base, v) {
+export function emitStilts(bld, F, s, y, base) {
   const L = F.L, iron = lin(IRON2);
   wb(bld, F, 0, L, -0.08, 0.025, y - 0.1, y, iron);                         // edge beam under the floor
   if (s.curve) return;
@@ -192,7 +192,7 @@ export function emitWall(bld, cell, y, s, v, b, supported, vv) {
       const overlay = feature.get(PLAN.over.get(sideKey(v, va === v ? vb : va, 1)));
       if (overlay) overlay.draw(bld, { F, y, v, lo, hi });
     }
-    if (stilt) emitStilts(bld, F, s, y, supportBase(v, y), v);
+    if (stilt) emitStilts(bld, F, s, y, supportBase(v, y));
     return;
   }
   // nothing directly below: the corners become piers that reach down to whatever is there
@@ -397,7 +397,7 @@ export function emitRoof(bld, ci, q, y, v, b, R, Vq) {
     return;
   }
   const fasc = lin(shade(roofHex, 0.72)), soff = lin(shade(b.c, 0.6));
-  const course = lin(roofHex, 0.8), capCol = lin(shade(roofHex, 0.74));
+  const capCol = lin(shade(roofHex, 0.74));
   const cone = R.some(r => r.cv);
   for (let i = 0; i < R.length - 1; i++) {
     const a = pt(R[i]), c = pt(R[i + 1]);

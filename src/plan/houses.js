@@ -2,7 +2,6 @@ import { vAdj } from '../core/grid.js';
 import { blocks, parseKey, topOf } from '../core/model.js';
 import { PALETTE, ROOF_TONES, SHUTTERS } from '../core/palette.js';
 import { hash } from '../core/util.js';
-import { cur } from '../render/time.js';
 
 // ---------- R1: houses ----------
 // Adjacent columns of the same base colour group into house-sized units. A house owns its traits,
@@ -61,4 +60,4 @@ export function computeHouses() {
     houses.push(h);
   }
 }
-export const roofOf = (v, y) => (houseOf(v) || {}).roof || '#c95f3c';
+export const roofOf = v => (houseOf(v) || {}).roof || '#c95f3c';

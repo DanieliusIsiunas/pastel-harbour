@@ -1,0 +1,4 @@
+#!/bin/sh
+# Quality gate before every commit: lint and the test suite (fixtures, planner rules, budgets).
+# The production build runs in `npm run check`; it is left out here to keep commits quick.
+npm run --silent lint && npm run --silent test -- --reporter=dot

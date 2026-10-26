@@ -1,6 +1,5 @@
 import { C } from '../core/palette.js';
 import { hash, lin, shade } from '../core/util.js';
-import { fx } from '../fx/particles.js';
 import { blob, frameRing, hole, rod, wb, wslab } from '../geom/builder.js';
 import { STREETS } from '../plan/analysis.js';
 

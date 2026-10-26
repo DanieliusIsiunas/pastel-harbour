@@ -20,7 +20,7 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
 
 ## Milestones
 
-- [x] **M0 Prototype** — square grid, boxes, auto roofs/windows/doors, arches (v1, `pastel-harbour.html`).
+- [x] **M0 Prototype** — square grid, boxes, auto roofs/windows/doors, arches (v1; removed from the tree, see git history).
 - [x] **M1 Organic grid** — hex → triangles → random quad pairing → subdivision → square relaxation;
       cells, adjacency, point-in-cell picking; all geometry bilinearly deformed onto cells.
 - [x] **M2 Architecture rules** — gable roofs that join along rows, flat roofs with parapets for
@@ -202,6 +202,18 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       screen edge. Measured: the framing distance goes from 6.6 (empty) to 9.2
       (six streets) to 13.3 (a five-storey tower) to 30 (a 406-block town, 1280×800). `harbourDev.camera()`
       reports the framing, and `harbourDev.auto()` hands the camera back after `harbourView`.
+
+### Engineering round
+
+- [x] **Q1 Quality gates** — `CLAUDE.md` sets the conventions and workflow for agentic work. ESLint covers
+      bugs and layering: core, plan, features and geom may not import render, fx or app. Vitest runs 80
+      tests in about 2 s: fixture digests (computed in Node, identical to the browser's), planner rules on the
+      fixtures and 8 generated towns (validator clean, doors onto open ground, no trees on walkways, every
+      lamp and span placed), feature registry completeness, and a performance budget (406-block town planned
+      and emitted in under 200 ms, triangle, brick and pick budgets). `npm run check` runs lint, tests and
+      the build; a pre-commit hook runs lint and tests. Lint found and fixed a real bug: a local `C` (the
+      cell centre) shadowed the palette in the street code, so quay stone and street foam silently took the
+      grout colour.
 
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
