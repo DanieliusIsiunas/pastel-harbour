@@ -14,7 +14,11 @@ export const bucket = () => ({ p: [], c: [], k: [], inst: [] });
 export const TRACE = { on: false };
 function caller() {
   const lines = new Error().stack.split('\n');
-  for (const l of lines.slice(2)) if (!l.includes('builder.js') && l.includes('/src/')) return l.replace(/^.*\/src\//, '').replace(/\)$/, '').replace(/:\d+$/, '');
+  for (const l of lines.slice(2)) {
+    if (l.includes('builder.js') || !l.includes('/src/')) continue;
+    const fn = (l.match(/at (?:Object\.)?([\w$]+) \(/) || [])[1];
+    return (fn ? fn + '@' : '') + l.replace(/^.*\/src\//, '').replace(/\)$/, '').replace(/:\d+$/, '');
+  }
   return '?';
 }
 // main town surfaces, glass, foam, window cut masks, the rooms behind windows, and instanced bricks
@@ -69,10 +73,15 @@ export function brickRows(bld, F, y0, y1, col, open, clip, size = [0.23, 0.1], p
     if (yt - yb < bh * 0.45) continue;
     const off = (r & 1) ? bw * 0.5 : 0;
     for (let sx = -off; sx < L; sx += bw) {
-      const s0 = Math.max(0, sx) + 0.004, s1 = Math.min(L, sx + bw) - 0.004;
+      let s0 = Math.max(0, sx) + 0.004, s1 = Math.min(L, sx + bw) - 0.004;
+      // a brick that runs into an opening is cut at its edge, like masonry at a window reveal; the larger
+      // piece stays (judged by the brick's extent, not its centre, so nothing pokes into the glass)
+      if (open) for (const o of open) {
+        if (yt <= o[2] || yb >= o[3] || s1 <= o[0] || s0 >= o[1]) continue;
+        if (o[0] - s0 >= s1 - o[1]) s1 = o[0] - 0.004; else s0 = o[1] + 0.004;
+      }
       if (s1 - s0 < 0.035) continue;
       const sm = (s0 + s1) / 2, ym = (yb + yt) / 2;
-      if (open && open.some(o => sm > o[0] && sm < o[1] && ym > o[2] && ym < o[3])) continue;
       if (clip && !clip(sm, ym)) continue;
       const x = F.a[0] + F.t[0] * sm, z = F.a[1] + F.t[1] * sm;
       const h1 = hash(Math.round(x * 97), Math.round(z * 97), Math.round(ym * 50), 77), h2 = hash(Math.round(x * 89), Math.round(ym * 61), 3, 78);

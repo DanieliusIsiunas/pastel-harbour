@@ -62,7 +62,10 @@ export function roundOf(v, y) {
 // A wall side between house corner v and open corner n is drawn by the two cells that share the edge v-n,
 // each from the joint (the edge midpoint) to where its corner starts to round. Windows, doors, dormers and
 // shops centred on the joint are drawn as two halves, so both must agree on what fits: this is the
-// shorter of the two straight lengths, the one both halves use.
+// shorter of the two straight lengths, the one both halves use. A half that ends in a crisp corner dressed
+// with quoins gives that strip to the corner stones, so windows and shutters are laid out in what is left.
+// the strip of wall at a crisp corner that its quoin stones take
+export const QUOIN_W = 0.17;
 export function jointHalf(v, n, y) {
   let L = Infinity;
   for (const [ci, k] of vCells[v]) {
@@ -71,7 +74,8 @@ export function jointHalf(v, n, y) {
     // corner v is rounded in this cell when its other neighbour in the cell is empty too
     const w = vv[(k + 1) & 3] === n ? vv[(k + 3) & 3] : vv[(k + 1) & 3], convex = has(v, y) && !has(w, y) && !has(n, y);
     const M = xz(cell, UVM[e][0], UVM[e][1]), C = cell.c, t = convex ? roundOf(v, y) : 0;
-    L = Math.min(L, Math.hypot(M[0] - (C[0] + (M[0] - C[0]) * t), M[1] - (C[1] + (M[1] - C[1]) * t)));
+    const quoins = convex && t < 0.1 && (houseOf(v) || {}).quoins ? QUOIN_W : 0;
+    L = Math.min(L, Math.hypot(M[0] - (C[0] + (M[0] - C[0]) * t), M[1] - (C[1] + (M[1] - C[1]) * t)) - quoins);
   }
   return L;
 }

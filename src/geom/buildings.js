@@ -7,7 +7,7 @@ import { C, IRON, IRON2, PALETTE, ROOF_OF, SHUTTERS } from '../core/palette.js';
 import { P3, hash, l2, lin, norm2, outward, shade, sub2 } from '../core/util.js';
 import { band, boxAt, brickRows, face, frameRing, hexa, hole, pickQuad, pickTri, wb, wseg } from './builder.js';
 import { emitGroundCell, railing } from './ground.js';
-import { apexOf, isGable, isLighthouse, isStilted, isolated, jointHalf, onStreet, roundOf, supportBase, toneOf } from './rules.js';
+import { QUOIN_W, apexOf, isGable, isLighthouse, isStilted, isolated, jointHalf, onStreet, roundOf, supportBase, toneOf } from './rules.js';
 import { houseOf, roofOf } from '../plan/houses.js';
 import { PLAN } from '../plan/planner.js';
 import { sideKey } from '../plan/analysis.js';
@@ -146,7 +146,7 @@ export function emitQuoins(bld, F, y, y0, y1, phase) {
     const long = ((r + phase) & 1) === 0, w = long ? 0.16 : 0.09;
     wb(bld, F, Math.max(0, L - w), L, -0.01, 0.022, yy + 0.008, Math.min(y1, yy + 0.162), stone);
   }
-  bld.open.push([L - 0.17, L + 1, y - 1, y + 2]);
+  bld.open.push([L - QUOIN_W, L + 1, y - 1, y + 2]);
 }
 
 export function emitWall(bld, cell, y, s, v, b, supported, vv) {

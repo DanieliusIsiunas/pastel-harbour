@@ -243,6 +243,14 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       slim piers instead of a full-height block. Ivy, woodpiles and barrels keep clear of walls that a
       door, staircase or shopfront uses.
 
+- [x] **F2 Clear openings** — corner stones and bricks no longer cover windows. Two generators shared one
+      strip of wall without knowing about each other: quoins took the last 17 cm of a half-wall at a crisp
+      corner while windows and shutters were laid out over the whole length, and a brick was kept unless
+      its centre fell in an opening, so a brick beside a window could reach 8 cm into the glass. Now
+      `jointHalf` gives the quoin strip to the corner before windows are laid out (on both halves alike),
+      and bricks are cut at the edge of an opening like masonry at a reveal. Bricks reaching into openings
+      went from 526 (town A), 734 (town B) and 70 (house types) to none, and a test keeps it there.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 

@@ -57,6 +57,9 @@ touch the DOM. That keeps them running in Node (tests) and movable to a worker l
   `npm run zfight -- --trace` to find ties; a test keeps them under 0.6% of triangles.
 - **Joint-centred details** (windows, doors, dormers, shops, balconies) are drawn as two halves by two cells.
   Decide what fits from `jointHalf(v, n, y)`, the length both halves share, so nothing is ever drawn half.
+  It already leaves out strips that other dressing claims (quoins at crisp corners: `QUOIN_W`); a new
+  corner or edge dressing must reserve its strip there too, and register openings in `bld.open` so bricks
+  are cut around them. A test checks that no brick or quoin reaches into a window or door.
 - **Randomness** is deterministic: `hash(a, b, c, salt)`. Pick a salt no other feature uses (grep for it)
   so features don't become correlated. Never use `Math.random()` in core, plan, features or geom.
 - **Shared dimensions** live in `src/core/dims.js`; colours in `src/core/palette.js`. Keep the
