@@ -148,6 +148,26 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       (median smallest angle 70° → 75°). Saved towns move to the new grid by matching each old corner to
       a nearby new one.
 
+### Real-life logic and light round
+
+- [x] **W1 Walkway-aware props** — the planner builds the walking network: open tiles joined along their
+      sides, with route tiles (tiles the network splits without: lanes, piers, necks between squares) and
+      tiles in front of doors, exterior stairs and water stairs. Trees stand only where the street has
+      room to spare: the middle of a square that is open on every side, or the water side of a wide quay
+      that isn't the only way through. Lamps stand at the kerb, on the side of the path rather than in
+      it, or hang from a bracket on a house wall beside the window; a free post only in an open square.
+      Benches keep clear of doors and stairs. The validator reports a tree on a walkway, a bench in front
+      of a door, or a lamp with nowhere to stand. `harbourDev.walk()` reports the network and each
+      lamp's spot.
+- [x] **W2 Soft light** — one darkening budget instead of five stacked effects. AgX tone mapping replaces
+      ACES (with a saturation lift so the palette keeps its colour), a warm sand-coloured bounce light
+      replaces the dark teal underside light, and screen-space AO, contact shadows and the voxel AO
+      floor are softened. Ink lines are now a deeper shade of the surface they sit on, not near-black.
+      Grout, railings and drainpipes are lighter. Measured with `harbourDev.shading()` on the default
+      town, wide view, day: near-black pixels 7.2% → 0.02%, dark-sharp pixels 6.6% → 0.66%, mean
+      luminance 0.38 → 0.55, saturation 0.43 → 0.40. A Townscaper screenshot measured 2.6%, 4.6%, 0.47
+      and 0.45.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
@@ -172,6 +192,7 @@ Code layout and the feature registry are described in ARCHITECTURE.md. In the br
 off for comparison (the ink outlines reuse the occlusion pass's buffers, so they are desktop-only too).
 `harbourStats()` reports blocks, houses, doors and how many pieces are still rippling.
 `harbourDev` builds precise test scenes (`build([[vertex, level, colour]])`, `clear()`, `vertexAt(x, z)`,
-`neighbors(v)`, `sample(seed)`), toggles `bricks(on)` / `rooms(on)`, reports `count()` of triangles and
+`neighbors(v)`, `sample(seed)`, `time(name)`), toggles `bricks(on)` / `rooms(on)`, reports `count()` of triangles and
 bricks, `plan()` and `why(vertex)` for the planner, and `digest()`, the geometry fingerprint the
-fixtures in `fixtures/` are checked against.
+fixtures in `fixtures/` are checked against. `walk()` reports the walking network, and `shading()`
+measures darkness and harshness at fixed camera views.

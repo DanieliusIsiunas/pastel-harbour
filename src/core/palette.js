@@ -24,5 +24,5 @@ export const PAVERS = ['#ddd5c7', '#d2c9b9', '#e4dccd', '#cbc2b1', '#d8cfbf'];
 export const LEAVES = ['#6f9e5c', '#5f8f4e', '#7fae63', '#88b86a', '#679a57'];
 export const BLOOMS = ['#f2a7b5', '#fbe7a1', '#f4f1ec', '#e8a3a0', '#c7b3e6', '#f6c28b'];
 export const ROOF_TONES = ['#dcaa63', '#e3b672', '#cf914e', '#d8723f', '#c95f3c', '#b9533b', '#e3824a', '#a94f45', '#d9a35f', '#c4683f'];
-export const IRON2 = '#33373d';
-export const IRON = lin('#2f3338');
+export const IRON2 = '#4c535b';
+export const IRON = lin('#4a5058');

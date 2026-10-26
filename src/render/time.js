@@ -7,9 +7,9 @@ import { gridMat, hemi, scene, sky, sun, water } from './stage.js';
 
 // ---------- M3: time of day ----------
 export const TIMES = {
-  Day:   { top: '#6f9fa9', horizon: '#86b1b8', sun: '#ffe4c0', sunI: 3.1, sunPos: [14, 22, 9],  hs: '#fff1df', hg: '#4f838d', hI: 1.6, water: '#478893', glow: 0,   glass: '#41546b', bloom: 0.0, foam: 0.55, foamCol: '#ffffff' },
-  Dusk:  { top: '#6d78b3', horizon: '#f7c59f', sun: '#ffad73', sunI: 1.9, sunPos: [26, 8, -6],  hs: '#f6cbb2', hg: '#56698a', hI: 1.0, water: '#86a3cc', glow: 0.9, glass: '#ffcf8a', bloom: 0.35, foam: 0.5, foamCol: '#ffe6d6' },
-  Night: { top: '#0b1430', horizon: '#2a3c66', sun: '#a9c1ff', sunI: 1.0, sunPos: [-12, 20, 10], hs: '#6074a8', hg: '#1a2647', hI: 1.0, water: '#1f3659', glow: 1.7, glass: '#ffd38f', bloom: 0.55, foam: 0.35, foamCol: '#7f90b8' },
+  Day:   { top: '#6f9fa9', horizon: '#86b1b8', sun: '#ffe4c0', sunI: 3.3, sunPos: [14, 22, 9],  hs: '#fff1df', hg: '#c4b196', hI: 2.0, water: '#478893', glow: 0,   glass: '#41546b', bloom: 0.0, foam: 0.55, foamCol: '#ffffff' },
+  Dusk:  { top: '#6d78b3', horizon: '#f7c59f', sun: '#ffad73', sunI: 1.9, sunPos: [26, 8, -6],  hs: '#f6cbb2', hg: '#9a8796', hI: 1.8, water: '#86a3cc', glow: 0.9, glass: '#ffcf8a', bloom: 0.35, foam: 0.5, foamCol: '#ffe6d6' },
+  Night: { top: '#0b1430', horizon: '#2a3c66', sun: '#a9c1ff', sunI: 1.0, sunPos: [-12, 20, 10], hs: '#7088c0', hg: '#34436a', hI: 1.8, water: '#1f3659', glow: 1.7, glass: '#ffd38f', bloom: 0.55, foam: 0.35, foamCol: '#7f90b8' },
 };
 export const TIME_ORDER = ['Day', 'Dusk', 'Night'];
 export let timeName = 'Day';

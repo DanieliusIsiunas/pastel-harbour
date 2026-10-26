@@ -7,7 +7,7 @@ import { rowboat } from '../geom/ground.js';
 // stone steps running down the face of the quay into the harbour, with a mooring bollard and a rowboat
 export default {
   kind: 'waterStairs', slot: 'edge', replacesRailing: true,
-  rule: { spacing: 3.2, p: 0.7, why: 'steps down to a moored rowboat' },
+  rule: { spacing: 3.2, p: 0.7, opens: true, why: 'steps down to a moored rowboat' },
   draw(bld, { a, c, Vq: inside }) {
     const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
     if (L < 0.3) return;

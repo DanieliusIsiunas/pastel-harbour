@@ -32,7 +32,7 @@ export function emitGroundCell(bld, ci) {
     if (e) { const fil = f[k] ? k : nx4(k), emp = f[k] ? nx4(k) : k; off = norm2(sub2(Vp[emp], Vp[fil])); }
     return { p: Mp[k], e, off };
   };
-  const grout = lin('#a99f8f'), stone = lin(C.stone), curb = lin('#b04f3e');
+  const grout = lin('#c2b8a6'), stone = lin(C.stone), curb = lin('#b04f3e');
   for (let q = 0; q < 4; q++) {
     if (!f[q]) continue;
     const v = vv[q], key = keyOf(v, 0), Vq = Vp[q];

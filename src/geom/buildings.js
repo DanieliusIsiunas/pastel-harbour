@@ -99,7 +99,7 @@ export function emitCellLevel(bld, ci, y) {
   if (meet.length === 2 && meet.every(sg => sup[sg.own])) {
     const [s1, s2] = meet, va = vv[s1.own], vb = vv[s2.own];
     if (houseOf(va) !== houseOf(vb) && blocks.get(keyOf(va, y)).c !== blocks.get(keyOf(vb, y)).c) {
-      const p = [C[0] + cOff[0] * 0.035, C[1] + cOff[1] * 0.035], pipe = lin('#4b5259');
+      const p = [C[0] + cOff[0] * 0.035, C[1] + cOff[1] * 0.035], pipe = lin('#69727b');
       const y0 = onStreet(va, y) ? y : y - 0.02, topLevel = !has(va, y + 1) && !has(vb, y + 1);
       boxAt(bld, p[0], p[1], 0.018, y0, y + (topLevel ? 0.86 : 1), pipe);
       for (const yy of [y + 0.3, y + 0.75]) boxAt(bld, p[0], p[1], 0.026, yy, yy + 0.03, pipe);

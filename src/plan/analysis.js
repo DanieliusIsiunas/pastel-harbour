@@ -42,3 +42,51 @@ export function lanePair(v) {
   }
   return pair;
 }
+
+// ---------- walking network ----------
+// Open tiles joined along their sides are the walkways. A tile is on a route when the network splits
+// without it (a lane, a pier, the neck between two squares) or when something opens onto it (a door,
+// the foot of an exterior stair, a water stair). A tile has an interior when it is open on every side,
+// so something standing in its middle leaves room to walk around. Props keep off routes.
+export let WALK = { route: new Set(), front: new Set() };
+export const hasInterior = v => vAdj[v].every(isOpen);
+export const onRoute = v => WALK.route.has(v);
+export function analyseWalks(open, fronts) {
+  const inOpen = new Set(open), depth = new Map(), low = new Map(), route = new Set(fronts);
+  // articulation points of the open-tile graph (iterative Tarjan)
+  for (const root of open) {
+    if (depth.has(root)) continue;
+    depth.set(root, 0); low.set(root, 0);
+    let rootKids = 0;
+    const stack = [[root, -1, 0]];
+    while (stack.length) {
+      const top = stack[stack.length - 1], [v, parent] = top, nb = vAdj[v];
+      if (top[2] < nb.length) {
+        const n = nb[top[2]++];
+        if (!inOpen.has(n) || n === parent) continue;
+        if (depth.has(n)) { low.set(v, Math.min(low.get(v), depth.get(n))); continue; }
+        depth.set(n, depth.get(v) + 1); low.set(n, depth.get(n));
+        if (v === root) rootKids++;
+        stack.push([n, v, 0]);
+      } else {
+        stack.pop();
+        if (parent >= 0) {
+          low.set(parent, Math.min(low.get(parent), low.get(v)));
+          if (parent !== root && low.get(v) >= depth.get(parent)) route.add(parent);
+        }
+      }
+    }
+    if (rootKids > 1) route.add(root);
+  }
+  WALK = { route, front: new Set(fronts) };
+}
+// how squarely a direction from tile v crosses the walking directions out of it: 0 means straight across
+// the path (the kerb side), 1 means along it (into the way)
+export function alongPath(v, dir) {
+  let worst = 0;
+  for (const o of vAdj[v]) if (isOpen(o)) {
+    const d = norm2(sub2(VERTS[o], VERTS[v]));
+    worst = Math.max(worst, Math.abs(d[0] * dir[0] + d[1] * dir[1]));
+  }
+  return worst;
+}

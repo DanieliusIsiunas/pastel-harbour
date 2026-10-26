@@ -17,8 +17,10 @@ renderer.shadowMap.autoUpdate = false;
 export let shadowsDirty = true;
 export function markShadows() { shadowsDirty = true; }
 export function consumeShadows() { const d = shadowsDirty; shadowsDirty = false; return d; }
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.98;
+// AgX keeps pastel colours and lifts dark tones gently, where ACES crushed the shadows and pushed oranges
+// toward neon
+renderer.toneMapping = THREE.AgXToneMapping;
+renderer.toneMappingExposure = 1.12;
 
 export const scene = new THREE.Scene();
 scene.fog = new THREE.Fog('#86b1b8', 45, 150);

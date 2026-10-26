@@ -3,7 +3,7 @@ import { has, topOf } from '../core/model.js';
 import { hash, l2 } from '../core/util.js';
 
 import { feature, rulesFor } from '../features/index.js';
-import { edgeKey, groundKind, houseType, isOpen, sideContext, sideKey } from './analysis.js';
+import { WALK, analyseWalks, edgeKey, groundKind, houseType, isOpen, sideContext, sideKey } from './analysis.js';
 import { houses } from './houses.js';
 import { STYLES } from './styles.js';
 
@@ -60,9 +60,28 @@ export function planScene() {
     for (const rule of R.side) apply(rule, PLAN.side);
     for (const rule of R.overlay) apply(rule, PLAN.over);
   }
-  // open ground: tiles first, then quay edges, each with spacing against its own kind
-  const open = [];
+  // open ground. The walking network comes first (doors and stairs are known by now), then quay edges,
+  // then tiles, so a tile prop can keep clear of a water stair or a bench on its edge
+  const open = [], fronts = [];
   for (let v = 0; v < VERTS.length; v++) if (!vFixed[v] && isOpen(v)) open.push(v);
+  for (const [key, kind] of PLAN.side) if (kind === 'door' || kind === 'stairs') fronts.push(+key.split('>')[1].split(':')[0]);
+  const edges = [];
+  for (const v of open) for (const n of vAdj[v]) if (!has(n, 0)) {
+    const shared = vCells[v].map(([ci]) => ci).filter(ci => vCells[n].some(([cj]) => cj === ci));
+    if (shared.length) edges.push({ v, n, cell: Math.min(...shared), mid: l2(VERTS[v], VERTS[n], 0.5) });
+  }
+  analyseWalks(open, fronts);
+  for (const rule of R.edge) {
+    const placed = [], salt = rule.kind.charCodeAt(0);
+    const cands = edges.filter(e => !PLAN.edge.has(edgeKey(e.v, e.n)) && (!rule.needs || rule.needs(e.v, e.n)))
+      .sort((a, b) => hash(a.v, a.n, 73, salt) - hash(b.v, b.n, 73, salt));
+    for (const e of cands) {
+      if (hash(e.v, e.n, 74, salt) > rule.p) continue;
+      if (placed.some(q => Math.hypot(q[0] - e.mid[0], q[1] - e.mid[1]) < rule.spacing)) continue;
+      placed.push(e.mid); PLAN.edge.set(edgeKey(e.v, e.n), { kind: rule.kind, cell: e.cell }); note(rule.kind, 'edge ' + edgeKey(e.v, e.n), rule.why);
+      if (rule.opens) WALK.front.add(e.v);
+    }
+  }
   for (const rule of R.node) {
     const placed = [], salt = rule.kind.charCodeAt(0);
     const cands = open.filter(v => !PLAN.node.has(v) && rule.ctx(groundKind(v)) && (!rule.needs || rule.needs(v)))
@@ -72,20 +91,6 @@ export function planScene() {
       const P = VERTS[v];
       if (placed.some(q => Math.hypot(q[0] - P[0], q[1] - P[1]) < rule.spacing)) continue;
       placed.push(P); PLAN.node.set(v, rule.kind); note(rule.kind, 'tile ' + v, rule.why);
-    }
-  }
-  const edges = [];
-  for (const v of open) for (const n of vAdj[v]) if (!has(n, 0)) {
-    const shared = vCells[v].map(([ci]) => ci).filter(ci => vCells[n].some(([cj]) => cj === ci));
-    if (shared.length) edges.push({ v, n, cell: Math.min(...shared), mid: l2(VERTS[v], VERTS[n], 0.5) });
-  }
-  for (const rule of R.edge) {
-    const placed = [], salt = rule.kind.charCodeAt(0);
-    const cands = edges.filter(e => !PLAN.edge.has(edgeKey(e.v, e.n))).sort((a, b) => hash(a.v, a.n, 73, salt) - hash(b.v, b.n, 73, salt));
-    for (const e of cands) {
-      if (hash(e.v, e.n, 74, salt) > rule.p) continue;
-      if (placed.some(q => Math.hypot(q[0] - e.mid[0], q[1] - e.mid[1]) < rule.spacing)) continue;
-      placed.push(e.mid); PLAN.edge.set(edgeKey(e.v, e.n), { kind: rule.kind, cell: e.cell }); note(rule.kind, 'edge ' + edgeKey(e.v, e.n), rule.why);
     }
   }
   // a street-level floor over open water shelters something under its arch: a boathouse
@@ -100,5 +105,13 @@ export function validatePlan() {
     const f = feature.get(kind), [vn, y] = key.split(':'), [v, n] = vn.split('>').map(Number);
     const issue = f && f.check && f.check(v, n, +y, kind);
     if (issue) PLAN.issues.push(issue + ' at ' + key);
+  }
+  for (const [v, kind] of PLAN.node) {
+    const f = feature.get(kind), issue = f && f.check && f.check(v);
+    if (issue) PLAN.issues.push(issue + ' at tile ' + v);
+  }
+  for (const [key, e] of PLAN.edge) {
+    const f = feature.get(e.kind), [v, n] = key.split('~').map(Number), issue = f && f.check && f.check(v, n);
+    if (issue) PLAN.issues.push(issue + ' at edge ' + key);
   }
 }

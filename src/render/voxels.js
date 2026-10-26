@@ -22,7 +22,7 @@ export const VOX_GLSL = `precision highp sampler3D;
 uniform sampler3D tVox; uniform vec3 voxOrigin; uniform vec3 voxSize;
 float voxAO(vec3 wp, vec3 n) {
   float o = texture(tVox, (wp + n * 0.38 - voxOrigin) / voxSize).r;
-  return clamp(1.0 - 1.1 * o, 0.45, 1.0);
+  return clamp(1.0 - 0.85 * o, 0.62, 1.0);
 }`;
 export function updateVoxels() {
   const { res, ox, oy, oz, nx, ny, nz } = VOX, idx = (i, j, k) => i + nx * (j + ny * k);

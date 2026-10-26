@@ -20,8 +20,8 @@ if (!lowPower) {
   gtao = new GTAOPass(scene, camera, 1, 1);
   const hideAll = gtao.overrideVisibility.bind(gtao);
   gtao.overrideVisibility = () => { hideAll(); for (const m of WINFX) m.visible = false; };
-  gtao.blendIntensity = 0.9;
-  gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.3, thickness: 1.2, scale: 1.25, samples: 10 });
+  gtao.blendIntensity = 0.6;
+  gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.3, thickness: 1.2, scale: 1.0, samples: 10 });
   gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 4, rings: 2, samples: 8 });
   composer.addPass(gtao);
 }
@@ -33,8 +33,8 @@ if (gtao) {
     uniforms: {
       tDiffuse: { value: null }, tNormal: { value: gtao.normalTexture }, tDepth: { value: gtao.depthTexture },
       resolution: { value: new THREE.Vector2(1, 1) }, cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
-      inkColor: { value: new THREE.Color('#2a2430') }, strength: { value: 0.62 },
-      proj: { value: new THREE.Matrix4() }, projInv: { value: new THREE.Matrix4() }, lightView: { value: new THREE.Vector3(0, 1, 0) }, contactStrength: { value: 0.32 },
+      inkColor: { value: new THREE.Color('#2a2430') }, strength: { value: 0.45 },
+      proj: { value: new THREE.Matrix4() }, projInv: { value: new THREE.Matrix4() }, lightView: { value: new THREE.Vector3(0, 1, 0) }, contactStrength: { value: 0.18 },
     },
     vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: `#include <packing>
@@ -73,7 +73,11 @@ void main() {
   }
   float fade = 1.0 - smoothstep(35.0, 110.0, d0);
   c.rgb *= 1.0 - contactStrength * contact(vUv, n0) * (1.0 - smoothstep(20.0, 45.0, d0));
-  c.rgb = mix(c.rgb, inkColor, e * strength * fade);
+  // AgX is gentle on colour; give back the saturation the palette was painted with
+  float lum = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+  c.rgb = max(mix(vec3(lum), c.rgb, 1.32), 0.0);
+  // the line is a deeper shade of the surface it sits on, not black, the way a painter inks
+  c.rgb = mix(c.rgb, c.rgb * 0.42 + inkColor * 0.12, e * strength * fade);
   gl_FragColor = c;
 }`,
   });
@@ -101,7 +105,7 @@ export function renderFrame(sunIntensity) {
     ink.uniforms.proj.value.copy(camera.projectionMatrix);
     ink.uniforms.projInv.value.copy(camera.projectionMatrixInverse);
     ink.uniforms.lightView.value.copy(sun.position).sub(sun.target.position).normalize().transformDirection(camera.matrixWorldInverse);
-    ink.uniforms.contactStrength.value = 0.32 * Math.min(1, sunIntensity / 2.4);
+    ink.uniforms.contactStrength.value = 0.18 * Math.min(1, sunIntensity / 2.4);
   }
   composer.render();
 }
