@@ -54,6 +54,9 @@ fixture scenes produce the same geometry digest as before the restructuring, and
   drawn in the facade phase `entry`, `front` or `window`), `overlay` (foot of a wall), `node` (open
   tiles), `edge` (quay edges, `replacesRailing` if it takes the railing's place), `boathouse`. Rule
   order is registry order.
+- **Grid versions:** `GRID_VERSION` in `core/palette.js` names the grid generator. Saves record it, and
+  `app/history.js` moves a town saved on an older grid to the current one by position. Changing grid
+  generation means bumping the version and re-recording `fixtures/baseline.json`.
 - **Still pending from 2:** geometry still imports three (colours via `lin`, `THREE.Color` in walls),
   so Node tests need a small shim or that dependency moved to `render/`.
 

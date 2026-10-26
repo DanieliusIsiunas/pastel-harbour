@@ -17,7 +17,7 @@ export const C = {
   flat: '#d9cdbd', leaf: '#7aa862', grass: '#9cc97a', foam: '#ffffff', gold: '#e9c46a', lamp: '#fff1c4',
 };
 
-export const GRID_SEED = 1337, HEX_N = 8, TRI_SIDE = 2, MAXY = 14;
+export const GRID_SEED = 1337, GRID_VERSION = 2, HEX_N = 8, TRI_SIDE = 2, MAXY = 14;
 
 export const SHUTTERS = ['#5f7f6a', '#4f6d8a', '#8a5a4a', '#6b5b7a', '#3f6b66', '#7a8f9e'];
 export const PAVERS = ['#ddd5c7', '#d2c9b9', '#e4dccd', '#cbc2b1', '#d8cfbf'];

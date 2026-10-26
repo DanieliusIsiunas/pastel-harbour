@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 import { WATER } from '../core/dims.js';
 import { busy, reduceMotion } from '../core/env.js';
-import { GRID } from '../core/grid.js';
+import { GRID, UVM, xz } from '../core/grid.js';
 import { WINFX } from './materials.js';
 
 // ---------- scene ----------
@@ -99,7 +99,15 @@ scene.add(water);
 
 // grid lines that brighten around the cursor
 export const gridPos = [];
-for (const [a, b] of GRID.edges) gridPos.push(GRID.V[a][0], WATER + 0.16, GRID.V[a][1], GRID.V[b][0], WATER + 0.16, GRID.V[b][1]);
+// the water grid shows build targets, not cells: each line runs from an edge midpoint to a cell centre,
+// so every outlined patch is exactly the footprint a click there fills
+for (const cell of GRID.cells) {
+  UVM.forEach((m, k) => {
+    if (cell.nb[k] < 0) return;   // the outer rim's corners can't be built on
+    const p = xz(cell, m[0], m[1]);
+    gridPos.push(p[0], WATER + 0.16, p[1], cell.c[0], WATER + 0.16, cell.c[1]);
+  });
+}
 export const gridGeo = new THREE.BufferGeometry();
 gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(gridPos, 3));
 export const gridMat = new THREE.ShaderMaterial({

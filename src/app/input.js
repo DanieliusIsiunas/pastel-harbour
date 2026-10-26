@@ -1,5 +1,5 @@
 import { redo, undo } from './history.js';
-import { act, pick, setGhost } from './picking.js';
+import { act, previewTarget, setGhost } from './picking.js';
 import { S } from './state.js';
 import { startAmbient } from '../fx/sound.js';
 import { canvas, gridMat } from '../render/stage.js';
@@ -30,5 +30,5 @@ addEventListener('keyup', e => { if (e.key === 'Shift') { shiftHeld = false; upd
 export function updateGhost() {
   if (!lastPointer || lastPointer.touch || down) { setGhost(null); return; }
   const erase = S.mode === 'erase' || shiftHeld;
-  setGhost(pick(lastPointer.x, lastPointer.y, erase), erase);
+  setGhost(previewTarget(lastPointer.x, lastPointer.y, erase), erase);
 }

@@ -3,7 +3,7 @@ import { commit } from './history.js';
 import { updateGhost } from './input.js';
 import { S } from './state.js';
 import { WATER } from '../core/dims.js';
-import { UVM, VERTS, cells, pv4, vCells, vFixed, vertexAt, xz } from '../core/grid.js';
+import { UVM, VERTS, cells, footprintAt, pv4, vAdj, vCells, vFixed, xz } from '../core/grid.js';
 import { blocks, has, keyOf } from '../core/model.js';
 import { MAXY, PALETTE } from '../core/palette.js';
 import { P3 } from '../core/util.js';
@@ -43,11 +43,34 @@ export function pick(cx, cy, erase) {
     }
     return best >= 0 ? { v: best, y } : null;
   }
-  if (pd < Infinity) {
-    const v = vertexAt(p.x, p.z);
-    return valid(v, 0) ? { v, y: 0 } : null;
-  }
-  return null;
+  return pd < Infinity ? groundTarget(p.x, p.z) : null;
+}
+// A click on the water lays a street on the footprint under the cursor, exactly the patch the water grid
+// outlines. Near a cell centre, where four footprints meet and a hair's difference decides, it prefers
+// a footprint that joins a street along a side, so a line of clicks becomes one connected street rather
+// than tiles touching at their corners. A footprint that is already taken (the water in the cut-off
+// corner of a rounded quay) passes to the nearest free corner of the same cell, so no click is wasted.
+const HUB = 0.35;
+const joinsStreet = v => vAdj[v].some(n => has(n, 0));
+function groundTarget(x, z) {
+  const f = footprintAt(x, z);
+  if (!f) return null;
+  if (f.hub > HUB) return valid(f.v, 0) ? { v: f.v, y: 0 } : null;
+  if (valid(f.v, 0) && joinsStreet(f.v)) return { v: f.v, y: 0 };
+  const free = f.cell.v.filter(v => valid(v, 0)), joined = free.filter(joinsStreet);
+  const d2 = v => (VERTS[v][0] - x) ** 2 + (VERTS[v][1] - z) ** 2;
+  const nearest = list => list.reduce((a, b) => (d2(b) < d2(a) ? b : a));
+  if (joined.length) return { v: nearest(joined), y: 0 };
+  if (valid(f.v, 0)) return { v: f.v, y: 0 };
+  return free.length ? { v: nearest(free), y: 0 } : null;
+}
+// what the hover preview shows is what a click builds: the click reuses the previewed target unless the
+// pointer has moved since
+let hover = null;
+export function previewTarget(x, y, erase) {
+  const t = pick(x, y, erase);
+  hover = { x, y, erase, t };
+  return t;
 }
 
 // hover ghost shaped like the house footprint around the corner
@@ -98,7 +121,9 @@ export function colorForPlacement() {
 S.nextMixed = colorForPlacement();
 
 export function act(cx, cy, erase) {
-  const t = pick(cx, cy, erase);
+  const same = hover && hover.erase === erase && Math.hypot(hover.x - cx, hover.y - cy) < 4;
+  const t = same ? hover.t : pick(cx, cy, erase);
+  hover = null;
   if (!t) return;
   if (t.erase) {
     requestRegen({ v: t.v, y: t.y, erase: true });

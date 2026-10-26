@@ -133,6 +133,21 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       rules add warehouse hoists with loading doors, barrels outside warehouses, woodpiles against
       cottages, and round windows near the tops of towers.
 
+### Ergonomics round (building should feel predictable)
+
+- [x] **E1 What you see is what you build** — the water grid now outlines build targets (each corner's
+      footprint: edge midpoints and cell centres) instead of the cells, so the patch you aim at is the
+      patch that fills. Water clicks pick the footprint under the cursor exactly, instead of the nearest
+      corner. Near a cell centre, where four footprints meet, a click prefers the one that joins a
+      street along a side, so a line of clicks becomes one connected street. A click builds exactly what
+      the hover preview showed. Measured on straight sweeps across the board, tiles that only touched a
+      neighbour at a corner dropped from 11.7% to 1.2% of clicks.
+- [x] **E2 Even targets** — the grid pairs triangles fewest-options-first, so almost none are left
+      single, and relaxation pulls every quad toward one common size. 5th–95th percentile target area
+      spread went from 3.8× to 2×, irregular corners from 149 to about 60, and quads are squarer
+      (median smallest angle 70° → 75°). Saved towns move to the new grid by matching each old corner to
+      a nearby new one.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
