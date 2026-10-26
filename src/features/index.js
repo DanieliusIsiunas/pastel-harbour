@@ -18,10 +18,11 @@ import stringLights from './stringLights.js';
 import tieArch from './tieArch.js';
 import lamp from './lamp.js';
 import waterStairs from './waterStairs.js';
+import fishingBoat from './fishingBoat.js';
 import bench from './bench.js';
 import boat from './boat.js';
 
-export const FEATURES = [door, stairs, shop, hoist, balcony, woodpile, barrels, ivy, tree, laundry, bunting, stringLights, tieArch, lamp, waterStairs, bench, boat];
+export const FEATURES = [door, stairs, shop, hoist, balcony, woodpile, barrels, ivy, tree, laundry, bunting, stringLights, tieArch, lamp, waterStairs, fishingBoat, bench, boat];
 export const feature = new Map();
 for (const f of FEATURES) for (const k of [f.kind, ...(f.aliases || [])]) feature.set(k, f);
 // a slot's rules in registry order: 'side' (wall sides), 'overlay' (the foot of a wall), 'node' (open

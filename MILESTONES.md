@@ -258,6 +258,22 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       re-aim the camera after moving it; before, each frame was drawn about 1° behind and the view shook
       (`harbourDev.steerTest()` measures it: 0.97° average before, 0° now).
 
+- [x] **C3 Boats with character** — the bay sailboats floated: their hull bottoms sat up to 8 cm above the
+      water, so the mirror showed a separate box under a strip of water, and they slid along sideways. All
+      boats are now lofted hulls (`src/geom/boats.js`: keel, turn of the bilge, painted band, sheer, a stem or
+      a transom) with draft, so the reflection starts at the waterline; reflections stay on, because every
+      other thing on the water reflects and a boat without one would look pasted on. Open boats keep their
+      floorboards above the waterline, a thin foam ring marks where moored hulls meet the water, and the
+      moving boats' wake is left out of the mirror. Four kinds, each where it belongs:
+      a rowboat at each water stair, painted in the colours of the nearest house (wall outside, roof along
+      the sheer, oar blades dipped to match); a covered launch with an outboard under each boathouse, its
+      canvas laced down and the house colour along its sheer, bow out toward open water; a new `fishingBoat`
+      edge feature, a double-ended gozzo with eyes on the bow, a mast lantern that lights at night, nets,
+      floats, crates and fenders, moored with lines to two bollards where the quay looks out on open water
+      (not into canals, not near water stairs); and three sailboats in the bay, each rigged its own way
+      (gaff catboat, sloop with a banded main and jib, lateen felucca), heeling to leeward with a pennant,
+      a stern lantern and a soft wake. Town A gains 4 fishing boats and ~6,000 triangles (252k → 258k).
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 

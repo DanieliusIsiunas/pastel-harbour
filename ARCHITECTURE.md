@@ -41,9 +41,9 @@ fixture scenes produce the same geometry digest as before the restructuring, and
     src/plan/             houses, analysis (tile, side and house contexts), styles (house-type
                           vocabularies), planner (runs the registry's rules, validator)
     src/features/         one module per feature: door, stairs, shop, hoist, balcony, woodpile,
-                          barrels, ivy, tree, laundry, lamp, waterStairs, bench, boat; index.js is the registry
+                          barrels, ivy, tree, laundry, lamp, waterStairs, fishingBoat, bench, boat; index.js is the registry
     src/geom/             builder (explicit target: mesh buckets, surface kind, openings, pick sink),
-                          rules (geometry predicates), buildings, ground
+                          rules (geometry predicates), buildings, ground, boats (lofted hulls)
     src/render/           stage, materials, voxels, town (rebuild, chunks, ripple), time, post
     src/fx/  src/app/     particles, sound, life; input, picking, ui, history, dev helpers, main loop
     fixtures/             scenes.js and baseline.json (geometry digests)
@@ -52,7 +52,8 @@ fixture scenes produce the same geometry digest as before the restructuring, and
   surface kind, `bld.open` the openings on the wall being decorated. There is no module-global mesh state.
 - **Feature module:** `{ kind, slot, phase?, rule, check?, draw(bld, ctx) }`. Slots: `side` (wall sides,
   drawn in the facade phase `entry`, `front` or `window`), `overlay` (foot of a wall), `node` (open
-  tiles), `edge` (quay edges, `replacesRailing` if it takes the railing's place), `boathouse`. Rule
+  tiles), `edge` (quay edges, `replacesRailing` if it takes the railing's place in its own cell, `clearsEdge`
+  if the whole edge must stay open, as for a boat moored alongside; draw gets the edge's `v` and `n`), `boathouse`. Rule
   order is registry order.
 - **Grid versions:** `GRID_VERSION` in `core/palette.js` names the grid generator. Saves record it, and
   `app/history.js` moves a town saved on an older grid to the current one by position. Changing grid
