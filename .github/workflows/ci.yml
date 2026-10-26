@@ -20,6 +20,7 @@ jobs:
       - run: npm run lint
       - run: npm test
         env:
-          # shared runners are slower and noisier than a laptop; the time budget gets twice the room there
-          PERF_BUDGET_SCALE: '2'
+          # shared runners are about 7x slower than a laptop and noisy, so CI only catches a large slowdown
+          # (1 s for the default town); the pre-commit hook keeps the tight 200 ms budget locally
+          PERF_BUDGET_SCALE: '5'
       - run: npm run build
