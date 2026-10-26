@@ -138,6 +138,17 @@ export function directCamera(dt) {
   state.lastDist = nd;
   state.lastTarget.copy(controls.target);
 }
+// Depth precision depends almost entirely on the near plane: with it at 0.1 the depth buffer could not tell
+// apart surfaces a few millimetres apart at normal viewing distances, and details on walls flickered. The
+// near plane now follows the camera, a tenth of the way to what it looks at (nothing is ever that close),
+// and the far plane reaches just past the sky. At the usual distance that is about 40 times finer.
+export function fitClipPlanes() {
+  const d = camera.position.distanceTo(controls.target);
+  const near = THREE.MathUtils.clamp(d * 0.1, 0.1, 6), far = d + 460;
+  if (Math.abs(near - camera.near) > camera.near * 0.02 || Math.abs(far - camera.far) > 1) {
+    camera.near = near; camera.far = far; camera.updateProjectionMatrix();
+  }
+}
 // dev views take the camera; auto() hands it back
 export function setManualCamera(on) {
   state.manual = on;

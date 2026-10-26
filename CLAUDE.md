@@ -15,6 +15,7 @@ after any user-visible change).
     npm run lint             # ESLint (bugs and layering, not formatting)
     npm test                 # Vitest: fixtures, planner rules, registry, performance budget (~2 s)
     npm run fixtures:update  # re-record fixtures/baseline.json after an intended geometry change
+    npm run zfight           # list faces that share a plane and flicker (add --trace for the source lines)
     npm run build            # dist/index.html and dist/artifact.html (one self-contained file)
 
 A pre-commit hook (`.githooks/pre-commit`, enabled by `npm install`) runs lint and tests.
@@ -49,6 +50,13 @@ touch the DOM. That keeps them running in Node (tests) and movable to a worker l
 - **Geometry** goes through the builder passed as the first argument (`bld`): `face`, `hexa`, `wb`, `wslab`,
   `boxAt`, `rod`, `blob`, ... `bld.kind` selects the painted material (0 plain, 1 brick, 2 tile, 3 stone,
   4 mortar); reset it to 0 after use. `bld.open` holds the openings on the wall being decorated.
+- **No two faces in one plane.** Faces that share a plane, face the same way and look different flicker
+  (z-fighting). Don't author a detail at exactly the depth or height of what it sits on. Runs that wrap
+  around a building (bands, cornices, plinths, footings) go through `band()`, which lifts each run by its
+  direction so corners never tie. `wb()` boxes get a hair-width skin automatically. Use
+  `npm run zfight -- --trace` to find ties; a test keeps them under 0.6% of triangles.
+- **Joint-centred details** (windows, doors, dormers, shops, balconies) are drawn as two halves by two cells.
+  Decide what fits from `jointHalf(v, n, y)`, the length both halves share, so nothing is ever drawn half.
 - **Randomness** is deterministic: `hash(a, b, c, salt)`. Pick a salt no other feature uses (grep for it)
   so features don't become correlated. Never use `Math.random()` in core, plan, features or geom.
 - **Shared dimensions** live in `src/core/dims.js`; colours in `src/core/palette.js`. Keep the

@@ -128,7 +128,7 @@ export function railing(bld, a, c, base) {
   const k = Math.max(1, Math.round(L / 0.16));
   for (let j = 0; j < k; j++) {
     const p = l2(a, c, j / k);
-    boxAt(bld, p[0], p[1], 0.008, base, base + 0.27, IRON);
+    boxAt(bld, p[0], p[1], 0.008, base, base + 0.266, IRON);   // just under the rail, so their tops don't tie
   }
 }
 // a street tile hemmed in by houses on every side becomes a little garden

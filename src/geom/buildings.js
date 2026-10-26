@@ -5,9 +5,9 @@ import { UVM, cells, nx4, pv4, vCells, xz } from '../core/grid.js';
 import { blocks, has, keyOf, topOf } from '../core/model.js';
 import { C, IRON, IRON2, PALETTE, ROOF_OF, SHUTTERS } from '../core/palette.js';
 import { P3, hash, l2, lin, norm2, outward, shade, sub2 } from '../core/util.js';
-import { boxAt, brickRows, face, frameRing, hexa, hole, pickQuad, pickTri, wb, wseg } from './builder.js';
+import { band, boxAt, brickRows, face, frameRing, hexa, hole, pickQuad, pickTri, wb, wseg } from './builder.js';
 import { emitGroundCell, railing } from './ground.js';
-import { apexOf, isGable, isLighthouse, isStilted, isolated, onStreet, roundOf, supportBase, toneOf } from './rules.js';
+import { apexOf, isGable, isLighthouse, isStilted, isolated, jointHalf, onStreet, roundOf, supportBase, toneOf } from './rules.js';
 import { houseOf, roofOf } from '../plan/houses.js';
 import { PLAN } from '../plan/planner.js';
 import { sideKey } from '../plan/analysis.js';
@@ -113,7 +113,9 @@ export function emitCellLevel(bld, ci, y) {
     const own = sup[k] ? k : nx4(k), v = vv[own], key = keyOf(v, y);
     const n = outward(Mp[k], Cm, Qc[own]), col = lin(blocks.get(key).c, toneOf(v, y) * 0.9);
     const mid = l2(Mp[k], Cm, 0.5);
-    bld.kind = 1; face(bld, 'main', [P3(Mp[k], y - 0.06), P3(Cm, y - 0.06), P3(Cm, y + ARCH), P3(Mp[k], y + ARCH)], col, [mid[0] - n[0], y + 0.3, mid[1] - n[1]]); bld.kind = 0;
+    // set 2 mm back from the wall plane it meets, so the two never share a plane
+    const a = [Mp[k][0] - n[0] * 0.002, Mp[k][1] - n[1] * 0.002], c = [Cm[0] - n[0] * 0.002, Cm[1] - n[1] * 0.002];
+    bld.kind = 1; face(bld, 'main', [P3(a, y - 0.06), P3(c, y - 0.06), P3(c, y + ARCH), P3(a, y + ARCH)], col, [mid[0] - n[0], y + 0.3, mid[1] - n[1]]); bld.kind = 0;
   }
 }
 
@@ -170,16 +172,18 @@ export function emitWall(bld, cell, y, s, v, b, supported, vv) {
   const stilt = !supported && isStilted(v, y);
   if (supported || stilt) {
     const street = onStreet(v, y);
-    const y0 = street ? y : y - 0.06, sb = street ? 0.8 : 1;
+    // a wall that stands on a wall starts exactly at its floor line (overlapping the one below would put two
+    // faces in one plane, a flickering strip under every storey); over arches or stilts it reaches a little lower
+    const y0 = street || supported ? y : y - 0.06, sb = street ? 0.8 : 1;
     // phones keep the shader-painted bricks; desktops get instanced ones over a mortar-coloured wall
     bld.kind = lowPower ? 1 : 4; face(bld, 'main', [P3(s.a, y0), P3(s.b, y0), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [sb, sb, 1, 1]); bld.kind = 0;
-    if (street) wb(bld, F, 0, L, -0.02, 0.022, y, y + 0.1, lin(shade(b.c, 0.82)));
+    if (street) band(bld, F, 0, L, -0.02, 0.022, y, y + 0.1, lin(shade(b.c, 0.82)));
     // a slim band marks each storey, a two-step cornice sits under every eave
-    if (!street && y >= 2) wb(bld, F, 0, L, -0.02, 0.016, y - 0.005, y + 0.035, lin(shade(b.c, 0.88)));
+    if (!street && y >= 2) band(bld, F, 0, L, -0.02, 0.016, y - 0.005, y + 0.035, lin(shade(b.c, 0.88)));
     if (!has(v, y + 1)) {
       const corn = lin('#' + new THREE.Color(b.c).lerp(new THREE.Color('#ffffff'), 0.55).getHexString());
-      wb(bld, F, 0, L, -0.02, 0.016, y + 0.85, y + 0.9, corn);
-      wb(bld, F, 0, L, -0.02, 0.034, y + 0.9, y + 0.955, corn);
+      band(bld, F, 0, L, -0.02, 0.016, y + 0.85, y + 0.9, corn);
+      band(bld, F, 0, L, -0.02, 0.034, y + 0.9, y + 0.955, corn);
     }
     bld.open.length = 0;
     const top = has(v, y + 1) ? y + 1 : y + 0.85, from = street ? y + 0.1 : y + 0.035;
@@ -198,8 +202,8 @@ export function emitWall(bld, cell, y, s, v, b, supported, vv) {
   // nothing directly below: the corners become piers that reach down to whatever is there
   const base = supportBase(v, y), overWater = base < GROUND;
   const footing = (s0, s1) => {
-    bld.kind = 3; wb(bld, F, s0, s1, -0.17, 0.05, WATER - 0.4, WATER + 0.14, lin(C.stone)); bld.kind = 0;
-    wb(bld, F, s0, s1, -0.19, 0.07, WATER + 0.14, WATER + 0.2, lin(C.stoneLip));
+    bld.kind = 3; band(bld, F, s0, s1, -0.17, 0.05, WATER - 0.4, WATER + 0.14, lin(C.stone)); bld.kind = 0;
+    band(bld, F, s0, s1, -0.19, 0.07, WATER + 0.14, WATER + 0.2, lin(C.stoneLip));
   };
   if (s.curve) {
     bld.kind = 1; face(bld, 'main', [P3(s.a, base), P3(s.b, base), P3(s.b, y + 1), P3(s.a, y + 1)], col, ref(mid), [0.7, 0.7, 1, 1]); bld.kind = 0;
@@ -242,10 +246,11 @@ export function emitWall(bld, cell, y, s, v, b, supported, vv) {
 // window, door and shop details. s = 0 is the joint at the edge midpoint, shared with the
 // neighbouring cell, so a window centred there is drawn as two matching halves.
 export function emitFacade(bld, y, s, F, v, b, vv, cell) {
-  const L = F.L;
-  if (L < 0.14) return;
   const va = vv[s.k], vb = vv[nx4(s.k)], lo = Math.min(va, vb), hi = Math.max(va, vb);
   const other = va === v ? vb : va;
+  // both halves of the joint decide what fits from the same length, so nothing is ever drawn half
+  const L = Math.min(F.L, jointHalf(v, other, y));
+  if (L < 0.14) return;
   const trim = lin(C.trim), roofHex = ROOF_OF[b.c] || '#7a5a4a';
   const lit = hash(lo, hi, y, 22) < 0.6 ? 'lit' : 'dark';
   const gcol = lit === 'lit' ? [1, 1, 1] : lin(C.glass);
@@ -290,7 +295,8 @@ export function emitFacade(bld, y, s, F, v, b, vv, cell) {
     frameRing(bld, F, 0, half, y + y0 + 0.035, y + y1 - 0.035, 0.035, trim, true);
     hole(bld, F, 0, half, y + y0 + 0.035, y + y1 - 0.035, lit);
     wb(bld, F, 0, 0.011, 0, 0.042, y + y0 + 0.035, y + y1 - 0.035, trim);
-    if (y1 - y0 < 0.6) wb(bld, F, 0, half, 0, 0.042, y + (y0 + y1) / 2 - 0.008, y + (y0 + y1) / 2 + 0.008, trim);
+    // the cross bar sits a hair behind the upright where they cross
+    if (y1 - y0 < 0.6) wb(bld, F, 0, half, 0, 0.039, y + (y0 + y1) / 2 - 0.008, y + (y0 + y1) / 2 + 0.008, trim);
     if (y1 - y0 > 0.3) head(half + 0.035, y + y1);
   };
   fc.house = house; fc.jointWindow = jointWindow;
@@ -340,7 +346,9 @@ export function emitFacade(bld, y, s, F, v, b, vv, cell) {
 export function capLine(bld, p0, p1, col) {
   const dx = p1[0] - p0[0], dz = p1[2] - p0[2], L = Math.hypot(dx, dz);
   if (L < 0.05) return;
-  const sx = -dz / L * 0.026, sz = dx / L * 0.026, h0 = 0.004, h1 = 0.042;
+  // caps meeting at a joint overlap; each sits at its own hair of height so their tops never tie
+  const e = 0.003 * hash(Math.round((p0[0] + p1[0]) * 97), Math.round((p0[1] + p1[1]) * 97), Math.round((p0[2] + p1[2]) * 97), 92);
+  const sx = -dz / L * 0.026, sz = dx / L * 0.026, h0 = 0.004 + e, h1 = 0.042 + e;
   hexa(bld, 'main', [[p0[0] - sx, p0[1] + h0, p0[2] - sz], [p0[0] + sx, p0[1] + h0, p0[2] + sz], [p1[0] + sx, p1[1] + h0, p1[2] + sz], [p1[0] - sx, p1[1] + h0, p1[2] - sz],
                 [p0[0] - sx, p0[1] + h1, p0[2] - sz], [p0[0] + sx, p0[1] + h1, p0[2] + sz], [p1[0] + sx, p1[1] + h1, p1[2] + sz], [p1[0] - sx, p1[1] + h1, p1[2] - sz]], col);
 }
