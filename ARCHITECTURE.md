@@ -37,7 +37,7 @@ fixture scenes produce the same geometry digest as before the restructuring, and
 14 feature kinds.
 
     index.html            dev shell (Vite entry)
-    src/core/             palette, util, grid, model (blocks), dims, env — no three.js
+    src/core/             palette, util, grid, model (blocks), target (build targets), dims, env — no three.js
     src/plan/             houses, analysis (tile, side and house contexts), styles (house-type
                           vocabularies), planner (runs the registry's rules, validator)
     src/features/         one module per feature: door, stairs, shop, hoist, balcony, woodpile,
