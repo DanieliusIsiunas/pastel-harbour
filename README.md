@@ -5,6 +5,8 @@ click a street or a house to build on it. The town works out the rest: roofs, wi
 stairs, balconies, shopfronts, lamps, trees, washing lines across lanes, boats at the quays. It re-plans
 itself around every click.
 
+**Play it: https://danieliusisiunas.github.io/pastel-harbour/** (deployed from `main` after every green CI run)
+
 Built with Three.js and plain ES modules. No game engine, no image assets: every brick, tile and ripple is
 generated.
 

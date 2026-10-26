@@ -1,7 +1,8 @@
 name: CI
 
 # The same gate as `npm run check`: lint, tests (fixtures, planner rules, registry, performance budget)
-# and the production build, on every push and pull request.
+# and the production build, on every push and pull request. A push to main that passes is then published
+# to GitHub Pages, so the live game is always the last green build.
 on:
   push:
   pull_request:
@@ -24,3 +25,27 @@ jobs:
           # (1 s for the default town); the pre-commit hook keeps the tight 200 ms budget locally
           PERF_BUDGET_SCALE: '5'
       - run: npm run build
+      - name: Keep the playable page for Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: mkdir -p site && cp dist/index.html site/index.html
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: site
+
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
