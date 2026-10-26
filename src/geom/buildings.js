@@ -142,10 +142,12 @@ export function emitStilts(bld, F, s, y, base) {
 // cut stone blocks that interlock up a crisp outside corner, alternating long and short
 export function emitQuoins(bld, F, y, y0, y1, phase) {
   const L = F.L, stone = lin(shade(C.stoneLip, 1.02));
+  bld.tag = 'quoin';
   for (let r = 0, yy = y0; yy < y1 - 0.05; r++, yy += 0.17) {
     const long = ((r + phase) & 1) === 0, w = long ? 0.16 : 0.09;
     wb(bld, F, Math.max(0, L - w), L, -0.01, 0.022, yy + 0.008, Math.min(y1, yy + 0.162), stone);
   }
+  bld.tag = null;
   bld.open.push([L - QUOIN_W, L + 1, y - 1, y + 2]);
 }
 

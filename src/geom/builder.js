@@ -4,9 +4,10 @@ import { hash, lin } from '../core/util.js';
 // ---------- mesh emission ----------
 // A builder is the explicit target of all geometry code: the mesh buckets being filled, the surface kind
 // for the painted-material shader (0 plain, 1 brick, 2 roof tiles, 3 cut stone, 4 mortar), the openings
-// on the wall being decorated (so bricks and ivy keep clear of windows), and the pick triangles sink.
+// on the wall being decorated (so bricks and ivy keep clear of windows), the pick triangles sink, and an
+// optional tag that labels what is being drawn (bucket.tags), for checks such as the openings test.
 export function makeBuilder(mesh, pick = { P: [], meta: [] }) {
-  return { mesh, kind: 0, open: [], pick };
+  return { mesh, kind: 0, open: [], pick, tag: null };
 }
 export const bucket = () => ({ p: [], c: [], k: [], inst: [] });
 // dev only: when on, every triangle records the source line that emitted it (bucket.src), so geometry
@@ -42,6 +43,8 @@ export function face(bld, bk, pts, col, ref, sh) {
   if (nx * (cx / n - ref[0]) + ny * (cy / n - ref[1]) + nz * (cz / n - ref[2]) < 0) { pts = pts.slice().reverse(); if (sh) sh = sh.slice().reverse(); }
   const B = bld.mesh[bk], tri = n === 4 ? [0, 1, 2, 0, 2, 3] : [0, 1, 2];
   if (TRACE.on) { const at = caller(); (B.src || (B.src = [])).push(at); if (n === 4) B.src.push(at); }
+  // tagged geometry (bld.tag set by the code drawing it) is remembered by triangle index, for checks
+  if (bld.tag) { const T = B.tags || (B.tags = new Map()), t0 = B.p.length / 9; T.set(t0, bld.tag); if (n === 4) T.set(t0 + 1, bld.tag); }
   for (const i of tri) {
     const p = pts[i], s = sh ? sh[i] : 1;
     B.p.push(p[0], p[1], p[2]);

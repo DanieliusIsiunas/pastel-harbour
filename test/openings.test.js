@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { runScene } from '../fixtures/driver.js';
 import { SCENES } from '../fixtures/scenes.js';
-import { BRICK_STRIDE, TRACE } from '../src/geom/builder.js';
+import { BRICK_STRIDE } from '../src/geom/builder.js';
 
 // Window and door openings must stay clear: no brick, quoin or other wall dressing may reach into one.
 // Openings are the stencil masks the window cut-outs are drawn through; each is a quad on the wall plane.
@@ -27,8 +27,6 @@ const along = (o, x, z) => {
 };
 
 describe('openings stay clear', () => {
-  beforeAll(() => { TRACE.on = true; });
-  afterAll(() => { TRACE.on = false; });
   for (const name of ['townA', 'townB', 'houseTypes']) {
     it(`${name}: no brick or quoin reaches into a window or door`, () => {
       const { town } = runScene(SCENES[name]), bad = [];
@@ -44,8 +42,8 @@ describe('openings stay clear', () => {
           }
         }
         const q = m.main;
-        for (let t = 0; t < q.p.length / 9; t++) {
-          if (!q.src || !q.src[t].startsWith('emitQuoins')) continue;
+        for (const t of q.tags ? q.tags.keys() : []) {
+          if (!q.tags || q.tags.get(t) !== 'quoin') continue;
           const xs = [q.p[t * 9], q.p[t * 9 + 3], q.p[t * 9 + 6]], ys = [q.p[t * 9 + 1], q.p[t * 9 + 4], q.p[t * 9 + 7]], zs = [q.p[t * 9 + 2], q.p[t * 9 + 5], q.p[t * 9 + 8]];
           for (const o of ops) {
             const ss = xs.map((x, k) => along(o, x, zs[k]));
