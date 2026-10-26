@@ -168,6 +168,16 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       luminance 0.38 → 0.55, saturation 0.43 → 0.40. A Townscaper screenshot measured 2.6%, 4.6%, 0.47
       and 0.45.
 
+- [x] **D1 Lanes that connect** — two tall houses facing each other across a lane now share a span,
+      chosen per lane so each kind gets its share: a washing line from window to window with shirts,
+      trousers, towels and socks on pegs; bunting high under the eaves; a string of bulbs that glows at
+      night; or, over a narrow lane, a stone tie arch at the first-floor line bracing the two walls.
+      Spans keep their distance from each other as one group (`group: 'span'` in a rule), and all share
+      one helper (`features/span.js`) that finds the facing walls.
+- [x] **D2 Shop signs** — shopfronts hang a blade sign on an iron bracket past the awning, in the
+      awning's colour, with a gilded emblem (a loaf, a fish or a bottle) that reads from along the street.
+      Dev helpers: `harbourDev.find(kind)` lists where a feature went, and `harbourDev.look(kind, i)` frames it.
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 

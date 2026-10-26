@@ -1,9 +1,10 @@
 import { commit } from './history.js';
 import { sampleTown } from './sample.js';
 import { VERTS, vAdj, vertexAt } from '../core/grid.js';
-import { blocks, keyOf, setBlocks } from '../core/model.js';
+import { blocks, has, keyOf, setBlocks } from '../core/model.js';
 import { houses } from '../plan/houses.js';
 import { lampSpot } from '../features/lamp.js';
+import { spanOf } from '../features/span.js';
 import { WALK } from '../plan/analysis.js';
 import { PLAN } from '../plan/planner.js';
 import { BRICK_GEO, MATS, brickMat, maskMat, roomDarkMat, roomLitMat } from '../render/materials.js';
@@ -12,7 +13,12 @@ import { TIMES, applyTime, cur, toState } from '../render/time.js';
 import { camera, controls, renderer, water } from '../render/stage.js';
 import { pickMesh, ripple, townObj } from '../render/town.js';
 
-window.harbourView = (x, y, z, tx = 0, ty = 1, tz = 0) => { camera.position.set(x, y, z); controls.target.set(tx, ty, tz); controls.update(); camera.updateMatrixWorld(); };
+// close-ups may come nearer than the player's zoom limit; the limit returns on the next wider view
+window.harbourView = (x, y, z, tx = 0, ty = 1, tz = 0) => {
+  camera.position.set(x, y, z); controls.target.set(tx, ty, tz);
+  controls.minDistance = Math.min(5, camera.position.distanceTo(controls.target) * 0.95);
+  controls.update(); camera.updateMatrixWorld();
+};
 window.harbourAO = on => { if (gtao) gtao.enabled = on; };
 // dev helper for building precise test scenes from the console
 window.harbourDev = {
@@ -61,6 +67,21 @@ window.harbourDev = {
     for (const h of houses) types[h.type] = (types[h.type] || 0) + 1;
     return { counts, houseTypes: types, issues: PLAN.issues.slice(0, 20), sample: PLAN.log.slice(0, 8) };
   },
+  // where every planned feature of a kind went: 'tile v', 'edge v~n' or 'v>n:y' (a wall side)
+  find: kind => PLAN.log.filter(e => e.kind === kind).map(e => e.at),
+  // frame the i-th planned feature of a kind on a tile: the camera stands back along the open street,
+  // looking at it from about head height above the roofs of a two-storey house
+  look: (kind, i = 0, back = 1.9, h = 3.1, ty = 2.2) => {
+    const at = PLAN.log.filter(e => e.kind === kind && e.at.startsWith('tile '))[i];
+    if (!at) return null;
+    const v = +at.at.slice(5), P = VERTS[v], sp = spanOf(v), open = vAdj[v].filter(n => has(n, 0) && !has(n, 1));
+    // a span is seen from along its lane; anything else from its first open neighbour
+    let d = sp ? sp.nrm : null;
+    if (!d) { const Q = VERTS[open.length ? open[0] : vAdj[v][0]], l = Math.hypot(Q[0] - P[0], Q[1] - P[1]) || 1; d = [(Q[0] - P[0]) / l, (Q[1] - P[1]) / l]; }
+    window.harbourView(P[0] + d[0] * back, h, P[1] + d[1] * back, P[0], ty, P[1]);
+    return v;
+  },
+  span: v => spanOf(v),
   // jump straight to a time of day (Day, Dusk, Night) without the transition
   time: name => { Object.assign(cur, toState(TIMES[name])); applyTime(); },
   // How dark and harsh the picture is, read back from the rendered frame at fixed camera views (the

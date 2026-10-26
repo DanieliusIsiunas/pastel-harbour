@@ -82,8 +82,10 @@ export function planScene() {
       if (rule.opens) WALK.front.add(e.v);
     }
   }
+  // rules that share a group (spans across a lane) keep their spacing from each other, not just from their own kind
+  const placedIn = new Map();
   for (const rule of R.node) {
-    const placed = [], salt = rule.kind.charCodeAt(0);
+    const group = rule.group || rule.kind, placed = placedIn.get(group) || placedIn.set(group, []).get(group), salt = rule.kind.charCodeAt(0);
     const cands = open.filter(v => !PLAN.node.has(v) && rule.ctx(groundKind(v)) && (!rule.needs || rule.needs(v)))
       .sort((a, b) => hash(a, 0, 71, salt) - hash(b, 0, 71, salt));
     for (const v of cands) {
