@@ -55,6 +55,9 @@ touch the DOM. That keeps them running in Node (tests) and movable to a worker l
   around a building (bands, cornices, plinths, footings) go through `band()`, which lifts each run by its
   direction so corners never tie. `wb()` boxes get a hair-width skin automatically. Use
   `npm run zfight -- --trace` to find ties; a test keeps them under 0.6% of triangles.
+- **Townsfolk** use what features tell them. A detail people would go to (a seat, a window, a mooring)
+  records a `spot()` where it draws; anything standing on the ground in the way records an `obstacle()`.
+  Errands are a rule table (`ERRANDS` in `src/plan/folk.js`) with a `why`, like the planner's.
 - **Joint-centred details** (windows, doors, dormers, shops, balconies) are drawn as two halves by two cells.
   Decide what fits from `jointHalf(v, n, y)`, the length both halves share, so nothing is ever drawn half.
   It already leaves out strips that other dressing claims (quoins at crisp corners: `QUOIN_W`); a new
@@ -78,7 +81,8 @@ touch the DOM. That keeps them running in Node (tests) and movable to a worker l
    If it changed by accident, find out why before re-recording.
 3. Look at it. In the dev page console, `harbourDev` offers: `sample(seed)`, `place(v, y)` /
    `remove(v, y)` (like clicks, with animation), `find(kind)` and `look(kind, i)` to frame a feature,
-   `span(v)`, `walk()`, `plan()`, `why(v)`, `time('Day'|'Dusk'|'Night')`, `rippleAt(v, age)` (frozen
+   `span(v)`, `walk()`, `plan()`, `why(v)`, `folk()`, `follow(i, state)`, `folkRate(k)` and `folkStep(sec)` for the
+   townsfolk, `frame()` (draw one frame, e.g. while the pane is hidden), `time('Day'|'Dusk'|'Night')`, `rippleAt(v, age)` (frozen
    water ripple), `shading()` (darkness metrics), `camera()` and `auto()`, `digest()`. `harbourView(...)` takes
    the camera manually; `harbourDev.auto()` hands it back.
 4. Lighting budget (default town, day, wide view, `harbourDev.shading()[0]`): near-black under 1%,

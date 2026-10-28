@@ -26,3 +26,14 @@ export const BLOOMS = ['#f2a7b5', '#fbe7a1', '#f4f1ec', '#e8a3a0', '#c7b3e6', '#
 export const ROOF_TONES = ['#dcaa63', '#e3b672', '#cf914e', '#d8723f', '#c95f3c', '#b9533b', '#e3824a', '#a94f45', '#d9a35f', '#c4683f'];
 export const IRON2 = '#4c535b';
 export const IRON = lin('#4a5058');
+// the townsfolk's clothes: coats and dresses a shade deeper than the walls, so people read against them
+export const FOLK = {
+  coats: ['#d9735f', '#5f86b3', '#e2b04a', '#6e9a74', '#9c7bb8', '#f0ebe0', '#c4573f', '#3f6b66', '#e48f9c', '#7a8f9e'],
+  trousers: ['#4a5560', '#6b4a3a', '#3d5878', '#5b4a7a', '#7a6a58', '#55606a'],
+  skirts: ['#c4573f', '#5f86b3', '#e2b04a', '#9c7bb8', '#6e9a74', '#e48f9c'],
+  skin: ['#f1c7a8', '#e0ab85', '#c58c62', '#8d5a3c', '#f6d6be', '#b07850'],
+  hair: ['#3b2a20', '#6b4a2e', '#c99b5b', '#a0522d', '#2a2a2e', '#e0c58f'],
+  grey: ['#e8e4dc', '#c9c4bb', '#a9a39a'],
+  hats: ['#e9d29a', '#4a5560', '#8a4a2f', '#3d5878', '#c4573f'],
+  oilskin: '#f2c230',
+};

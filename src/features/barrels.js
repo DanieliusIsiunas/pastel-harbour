@@ -1,5 +1,5 @@
 import { hash, lin, shade } from '../core/util.js';
-import { boxAt } from '../geom/builder.js';
+import { boxAt, obstacle } from '../geom/builder.js';
 import { STREETS } from '../plan/analysis.js';
 
 // barrels of goods outside a warehouse
@@ -16,6 +16,7 @@ export default {
       const sx = s0 + 0.07 + i * 0.15;
       if (sx > F.L - 0.06) break;
       const x = F.a[0] + F.t[0] * sx + F.n[0] * 0.1, z = F.a[1] + F.t[1] * sx + F.n[1] * 0.1, tall = 0.15 + hash(seed, i, 1, 68) * 0.03;
+      obstacle(bld, [x, z], [x, z], 0.07);
       boxAt(bld, x, z, 0.06, y, y + tall, lin(shade('#9a6b45', 0.9 + 0.2 * hash(seed, i, 2, 68))));
       for (const hy of [0.03, tall - 0.045]) boxAt(bld, x, z, 0.064, y + hy, y + hy + 0.014, iron);
       boxAt(bld, x, z, 0.052, y + tall, y + tall + 0.006, lin(shade('#9a6b45', 0.7)));

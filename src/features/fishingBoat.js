@@ -2,7 +2,7 @@ import { EDGE, GROUND } from '../core/dims.js';
 import { VERTS, cells, vAdj, vCells } from '../core/grid.js';
 import { has, topOf } from '../core/model.js';
 import { hash, l2, lin, norm2, outward, sub2 } from '../core/util.js';
-import { boxAt, rod } from '../geom/builder.js';
+import { boxAt, obstacle, rod, spot } from '../geom/builder.js';
 import { fishingBoat } from '../geom/boats.js';
 import { PLAN } from '../plan/planner.js';
 
@@ -35,8 +35,11 @@ export default {
     const ends = fishingBoat(bld, B.at[0], B.at[1], bow, quay, [v, n]);
     // a bollard on the quay at each end of the berth, the boat's lines made fast to them
     const iron = lin('#3b4148'), line = lin('#c8b48a');
+    // the middle of the berth, where the crew stands to work on the boat
+    spot(bld, 'mooring', v, [B.m[0] - B.d[0] * 0.17, B.m[1] - B.d[1] * 0.17], B.d, GROUND, { crew: true });
     for (const c of B.cs) {
       const p = l2(B.m, c, 0.5), inn = outward(B.m, c, VERTS[n]), q = [p[0] + inn[0] * 0.09, p[1] + inn[1] * 0.09];
+      obstacle(bld, q, q, 0.04);
       boxAt(bld, q[0], q[1], 0.03, GROUND, GROUND + 0.1, iron);
       boxAt(bld, q[0], q[1], 0.04, GROUND + 0.1, GROUND + 0.125, iron);
       const e = ends.slice().sort((a, b) => Math.hypot(a[0] - q[0], a[2] - q[1]) - Math.hypot(b[0] - q[0], b[2] - q[1]))[0];

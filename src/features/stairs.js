@@ -1,7 +1,7 @@
 import { has } from '../core/model.js';
 import { C } from '../core/palette.js';
 import { lin } from '../core/util.js';
-import { hexa, wb, wseg, wslab } from '../geom/builder.js';
+import { hexa, obstacle, wb, wseg, wslab } from '../geom/builder.js';
 import { jointHalf } from '../geom/rules.js';
 import { STREETS, sideKey } from '../plan/analysis.js';
 import { PLAN } from '../plan/planner.js';
@@ -18,7 +18,11 @@ export default {
     : 'stairs without a top door or a street'),
   draw(bld, { F, y, L, s, cell, trim, roofHex }) {
     const role = cell.i < cell.nb[s.k] ? 'low' : 'high';
-    if (y === 1) { flight(bld, F, role, y); return true; }
+    if (y === 1) {
+      obstacle(bld, [F.a[0] + F.n[0] * 0.08, F.a[1] + F.n[1] * 0.08], [F.a[0] + F.t[0] * F.L + F.n[0] * 0.08, F.a[1] + F.t[1] * F.L + F.n[1] * 0.08], 0.09);
+      flight(bld, F, role, y);
+      return true;
+    }
     if (role === 'high' && L > 0.3) {
       const s1 = L - 0.03, s0 = s1 - 0.19;
       wb(bld, F, s0 - 0.03, s1 + 0.02, 0, 0.025, y, y + 0.72, trim);

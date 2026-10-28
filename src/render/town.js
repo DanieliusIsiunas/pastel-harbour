@@ -5,6 +5,7 @@ import { VERTS, cells } from '../core/grid.js';
 import { blocks } from '../core/model.js';
 import { C } from '../core/palette.js';
 import { hash } from '../core/util.js';
+import { syncTownFolk } from '../fx/folk.js';
 import { burst, sparkleAt } from '../fx/particles.js';
 import { pluck } from '../fx/sound.js';
 import { BRICK_STRIDE, newMesh } from '../geom/builder.js';
@@ -107,6 +108,7 @@ export function rebuild() {
   const now = performance.now(), sigs = new Map(), changed = [];
   const town = emitTown(), { pick, trees } = town;
   updateVoxels();
+  syncTownFolk(town.walk);
   for (const [code, m] of town.chunks) {
     const sig = sigOf(m);
     sigs.set(code, sig);

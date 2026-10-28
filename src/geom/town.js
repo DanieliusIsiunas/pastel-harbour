@@ -10,28 +10,29 @@ import { resetCaches } from './rules.js';
 // ---------- the whole town as plain data ----------
 // Plans the scene and emits every piece of geometry, without Three.js: the renderer turns the result into
 // meshes, and tests and the fixture digest read it directly. A chunk is one cell at one level, keyed
-// cell * 64 + level; courtyards are emitted per open tile.
+// cell * 64 + level; courtyards are emitted per open tile. `walk` holds what the details mean to the
+// townsfolk: spots to go to and obstacles to walk around (see builder.js).
 export function emitTown() {
   resetCaches();
   computeHouses();
   planScene();
-  const pick = { P: [], meta: [] }, trees = [], chunks = new Map(), courtyards = new Map(), todo = new Set();
+  const pick = { P: [], meta: [] }, walk = { spots: [], blocks: [] }, trees = [], chunks = new Map(), courtyards = new Map(), todo = new Set();
   for (const k of blocks.keys()) {
     const [v, y] = parseKey(k);
     for (const [ci] of vCells[v]) todo.add(ci * 64 + y);
   }
   for (const code of todo) {
     const m = newMesh();
-    emitCellLevel(makeBuilder(m, pick), Math.floor(code / 64), code % 64);
+    emitCellLevel(makeBuilder(m, pick, walk), Math.floor(code / 64), code % 64);
     chunks.set(code, m);
   }
   for (let v = 0; v < VERTS.length; v++) {
     if (!isCourtyard(v)) continue;
     const m = newMesh();
-    emitCourtyard(makeBuilder(m, pick), v, trees);
+    emitCourtyard(makeBuilder(m, pick, walk), v, trees);
     courtyards.set(v, m);
   }
-  return { chunks, courtyards, trees, pick, plan: PLAN };
+  return { chunks, courtyards, trees, pick, walk, plan: PLAN };
 }
 
 // a cheap signature of a chunk's geometry, to tell which chunks a click changed

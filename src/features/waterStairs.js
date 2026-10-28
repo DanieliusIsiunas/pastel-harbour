@@ -1,7 +1,7 @@
 import { GROUND, WATER } from '../core/dims.js';
 import { C } from '../core/palette.js';
 import { lin, norm2, outward, shade, sub2 } from '../core/util.js';
-import { boxAt, rod, wb } from '../geom/builder.js';
+import { boxAt, obstacle, rod, spot, wb } from '../geom/builder.js';
 import { ownerOf, skiff } from '../geom/boats.js';
 
 // stone steps running down the face of the quay into the harbour, with a mooring bollard and the rowboat of
@@ -22,6 +22,9 @@ export default {
     wb(bld, F, run, run + 0.04, 0, 0.17, WATER - 0.3, GROUND + 0.02, lin(C.stoneLip));
     const iron = lin('#3b4148');
     const bx = F.a[0] + F.t[0] * (run + 0.12) - F.n[0] * 0.08, bz = F.a[1] + F.t[1] * (run + 0.12) - F.n[1] * 0.08;
+    obstacle(bld, [bx, bz], [bx, bz], 0.04);
+    // the top of the steps, where the owner stands to look the boat over
+    spot(bld, 'mooring', v, [F.a[0] + F.t[0] * run * 0.45 - F.n[0] * 0.13, F.a[1] + F.t[1] * run * 0.45 - F.n[1] * 0.13], F.n, GROUND);
     boxAt(bld, bx, bz, 0.03, GROUND, GROUND + 0.1, iron);
     boxAt(bld, bx, bz, 0.04, GROUND + 0.1, GROUND + 0.125, iron);
     // the reason for the stairs: a rowboat tied up alongside, its painter rope looped over the bollard

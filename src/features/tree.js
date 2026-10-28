@@ -1,6 +1,7 @@
 import { VERTS, vAdj } from '../core/grid.js';
 import { has } from '../core/model.js';
 import { l2 } from '../core/util.js';
+import { obstacle } from '../geom/builder.js';
 import { plantedTree } from '../geom/ground.js';
 import { WALK, edgeKey, hasInterior, isOpen, onRoute } from '../plan/analysis.js';
 import { PLAN } from '../plan/planner.js';
@@ -18,6 +19,7 @@ export default {
   draw(bld, { v, x, z }) {
     const water = hasInterior(v) ? undefined : shore(v);
     const p = water === undefined ? [x, z] : l2(VERTS[v], VERTS[water], 0.3);
+    obstacle(bld, p, p, 0.15);
     plantedTree(bld, p[0], p[1], v);
   },
 };

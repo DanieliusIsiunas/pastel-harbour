@@ -5,6 +5,7 @@ import { VERTS, vAdj, vertexAt } from '../core/grid.js';
 import { blocks, has, keyOf, setBlocks } from '../core/model.js';
 import { houses } from '../plan/houses.js';
 import { lampSpot } from '../features/lamp.js';
+import { animateFolk, folk, folkClock } from '../fx/folk.js';
 import { rippleClock, ripples } from '../fx/particles.js';
 import { spanOf } from '../features/span.js';
 import { digestTown, emitTown } from '../geom/town.js';
@@ -141,6 +142,35 @@ window.harbourDev = {
     const lamps = {}, spots = [];
     for (const [v, k] of PLAN.node) if (k === 'lamp') { const s = lampSpot(v), at = s ? s.at : 'none'; lamps[at] = (lamps[at] || 0) + 1; spots.push([v, at, s && s.n]); }
     return { routeTiles: WALK.route.size, frontTiles: WALK.front.size, lamps, spots };
+  },
+  // the townsfolk: how many, what they are doing, who they are, the spots the town offers them, and what
+  // they did lately
+  folk: () => {
+    const count = (list, f) => { const o = {}; for (const x of list) o[f(x)] = (o[f(x)] || 0) + 1; return o; };
+    return { people: folk.people.length, states: count(folk.people, p => p.st), personas: count(folk.people, p => p.persona),
+      spots: count(folk.world ? folk.world.spots : [], s => s.kind), done: count(folk.log, e => e.kind) };
+  },
+  // run the townsfolk's time at a rate: 0 freezes them for a close look, 1 is normal
+  folkRate: k => { folkClock.rate = k; },
+  // run the townsfolk forward by some seconds at once (at the current time of day), then draw one frame:
+  // for checking behaviour without waiting, and for screenshots while the page is hidden
+  folkStep: (sec = 1) => {
+    const rate = folkClock.rate;
+    folkClock.rate = 1;
+    for (let i = 0; i < sec * 30; i++) animateFolk(1 / 30, Math.min(1, cur.glow / 1.7));
+    folkClock.rate = rate;
+    window.harbourDev.frame();
+  },
+  // draw one frame now (animation frames are throttled while the page is hidden)
+  frame: () => { controls.update(); camera.updateMatrixWorld(); renderer.shadowMap.needsUpdate = true; renderFrame(cur.sunI); },
+  // frame the i-th person from in front of them, optionally only those in a state ('walk', 'chat') or busy
+  // with an errand at its spot ('bench', 'shop', 'mooring', ...)
+  follow: (i = 0, st = null, back = 1.3, h = 1.9) => {
+    const p = folk.people.filter(o => o.vis > 0.5 && (!st || o.st === st || o.st === 'do' && o.task && o.task.kind === st))[i];
+    if (!p) return null;
+    window.harbourView(p.x + Math.sin(p.yaw) * back, h, p.z + Math.cos(p.yaw) * back, p.x, p.y + 0.25, p.z);
+    window.harbourDev.frame();
+    return { id: p.id, persona: p.persona, st: p.st, task: p.task && p.task.kind, carry: p.carry };
   },
   why: v => PLAN.log.filter(e => e.at.startsWith(v + '>') || e.at === 'tile ' + v || e.at.startsWith('edge ' + v + '~')),
   toggle: { shadows: on => { renderer.shadowMap.autoUpdate = on; }, bloom: on => { bloom.enabled = on; }, reflection: on => { water.visible = on; } },
