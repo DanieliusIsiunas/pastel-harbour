@@ -4,10 +4,22 @@ import { hash, lin } from '../core/util.js';
 // ---------- mesh emission ----------
 // A builder is the explicit target of all geometry code: the mesh buckets being filled, the surface kind
 // for the painted-material shader (0 plain, 1 brick, 2 roof tiles, 3 cut stone, 4 mortar), the openings
-// on the wall being decorated (so bricks and ivy keep clear of windows), the pick triangles sink, and an
-// optional tag that labels what is being drawn (bucket.tags), for checks such as the openings test.
-export function makeBuilder(mesh, pick = { P: [], meta: [] }) {
-  return { mesh, kind: 0, open: [], pick, tag: null };
+// on the wall being decorated (so bricks and ivy keep clear of windows), the pick triangles sink, the
+// street-life sink (spots and obstacles for the townsfolk, see below), and an optional tag that labels what
+// is being drawn (bucket.tags), for checks such as the openings test.
+export function makeBuilder(mesh, pick = { P: [], meta: [] }, walk = null) {
+  return { mesh, kind: 0, open: [], pick, walk, tag: null };
+}
+// What a detail means to the people in the street, recorded where it is drawn so it matches the geometry
+// exactly. A spot is somewhere to go and do something (sit on a bench, look in a shop window, watch the
+// water), reached from open tile v; dir is the way a person there faces, y the height they stand or sit at,
+// and `via` an optional last step to come in by (round the end of a bench). An obstacle is a capsule from a
+// to b of radius r on the ground that walkers keep clear of.
+export function spot(bld, kind, v, p, dir, y, extra) {
+  if (bld.walk) bld.walk.spots.push({ kind, v, x: p[0], z: p[1], y, dir: [dir[0], dir[1]], ...extra });
+}
+export function obstacle(bld, a, b, r) {
+  if (bld.walk) bld.walk.blocks.push([a[0], a[1], b[0], b[1], r]);
 }
 export const bucket = () => ({ p: [], c: [], k: [], inst: [] });
 // dev only: when on, every triangle records the source line that emitted it (bucket.src), so geometry

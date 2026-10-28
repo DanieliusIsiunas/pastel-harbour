@@ -1,7 +1,8 @@
+import { GROUND } from '../core/dims.js';
 import { has } from '../core/model.js';
 import { C, LEAVES } from '../core/palette.js';
 import { hash, lin, shade } from '../core/util.js';
-import { blob, hole, wb, wseg, wslab } from '../geom/builder.js';
+import { blob, hole, obstacle, spot, wb, wseg, wslab } from '../geom/builder.js';
 import { WALKABLE } from '../plan/analysis.js';
 import { houseOf, roofOf } from '../plan/houses.js';
 import { styleOf } from '../plan/styles.js';
@@ -12,9 +13,11 @@ export default {
   rule: { at: (v, y) => y === 1, ctx: c => WALKABLE.has(c), grounded: true, max: h => (h.cols.length >= 4 ? 2 : 1), p: () => 1,
     onPlace: (h, sd) => h.doors.set(sd.v, sd.n), why: 'opens onto a street, plaza, courtyard or quay' },
   check: (v, n) => (has(n, 0) && !has(n, 1) ? null : 'door into nowhere'),
-  draw(bld, { F, y, L, v, lo, hi }) {
+  draw(bld, { F, y, L, v, n, lo, hi }) {
     const kind = styleOf(v).door;
     doorway(bld, F, y, L, kind, roofOf(v, y), lo, hi);
+    // the threshold, where the people who live here come and go and visitors knock
+    spot(bld, 'door', n, [F.a[0] + F.n[0] * 0.07, F.a[1] + F.n[1] * 0.07], [-F.n[0], -F.n[1]], GROUND, { home: v });
     if (kind !== 'barn' && L > 0.33) {
       wb(bld, F, 0.27, 0.32, 0, 0.07, y + 0.52, y + 0.62, lin(C.lamp), 'lit');
       wb(bld, F, 0.285, 0.305, 0, 0.07, y + 0.62, y + 0.66, lin(C.wood));
@@ -25,6 +28,7 @@ export default {
       wb(bld, F, 0.31, 0.39, 0.05, 0.13, y, y + 0.12, lin('#b8694c'));
       wb(bld, F, 0.3, 0.4, 0.04, 0.14, y + 0.12, y + 0.14, lin(shade('#b8694c', 0.85)));
       const px = F.a[0] + F.t[0] * 0.35 + F.n[0] * 0.09, pz = F.a[1] + F.t[1] * 0.35 + F.n[1] * 0.09;
+      obstacle(bld, [px, pz], [px, pz], 0.07);
       blob(bld, px, y + 0.24, pz, 0.075, 0.1, 0.075, LEAVES[Math.floor(hash(lo, hi, 1, 50) * LEAVES.length)]);
     }
     return true;

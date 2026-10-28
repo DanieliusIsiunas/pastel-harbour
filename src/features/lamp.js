@@ -3,7 +3,7 @@ import { VERTS, vAdj } from '../core/grid.js';
 import { has } from '../core/model.js';
 import { C } from '../core/palette.js';
 import { hash, l2, lin, norm2, sub2 } from '../core/util.js';
-import { boxAt, rod } from '../geom/builder.js';
+import { boxAt, obstacle, rod } from '../geom/builder.js';
 import { alongPath, edgeKey, hasInterior, onRoute, sideKey } from '../plan/analysis.js';
 import { PLAN } from '../plan/planner.js';
 
@@ -41,6 +41,7 @@ export default {
       return;
     }
     const p = spot.at === 'kerb' ? l2(VERTS[v], VERTS[spot.n], 0.42) : [x, z];
+    obstacle(bld, p, p, 0.04);
     boxAt(bld, p[0], p[1], 0.03, GROUND, GROUND + 0.07, iron);
     boxAt(bld, p[0], p[1], 0.012, GROUND + 0.07, GROUND + 0.62, iron);
     boxAt(bld, p[0], p[1], 0.036, GROUND + 0.62, GROUND + 0.71, lin(C.lamp), 'lit');

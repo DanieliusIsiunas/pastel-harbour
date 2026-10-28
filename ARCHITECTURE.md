@@ -55,6 +55,13 @@ fixture scenes produce the same geometry digest as before the restructuring, and
   tiles), `edge` (quay edges, `replacesRailing` if it takes the railing's place in its own cell, `clearsEdge`
   if the whole edge must stay open, as for a boat moored alongside; draw gets the edge's `v` and `n`), `boathouse`. Rule
   order is registry order.
+- **Townsfolk:** `src/plan/folk.js` is the people of the town as plain, deterministic data: who lives in
+  which house, the errand table, walks over the open tiles, and a small state machine per person
+  (inside, emerge, walk, settle, do, chat, hop, enter). Features tell it what they mean to people where they
+  draw, through the builder: `spot(bld, kind, tile, p, dir, y, extra)` (somewhere to go and do something)
+  and `obstacle(bld, a, b, r)` (something on the ground to walk round); `emitTown()` returns them as
+  `walk`. The renderer calls `syncFolk` after each rebuild and `stepFolk` each frame; `src/fx/folk.js`
+  poses the figures with one instanced mesh per body part.
 - **Grid versions:** `GRID_VERSION` in `core/palette.js` names the grid generator. Saves record it, and
   `app/history.js` moves a town saved on an older grid to the current one by position. Changing grid
   generation means bumping the version and re-recording `fixtures/baseline.json`.

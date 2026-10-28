@@ -64,7 +64,8 @@ export const roomMat = (hex) => new THREE.MeshBasicMaterial({
 });
 export const roomLitMat = roomMat('#3a4658'), roomDarkMat = roomMat('#2b3443');
 export const brickMat = new THREE.MeshStandardMaterial({ roughness: 0.84, metalness: 0 });
-brickMat.onBeforeCompile = sh => {
+// instanced pieces (bricks, townsfolk) darken in the town's corners like the surfaces around them
+export const instancedAO = sh => {
   Object.assign(sh.uniforms, voxUniforms);
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;')
@@ -78,6 +79,7 @@ vWP = (modelMatrix * bwp).xyz; vWN = normalize(mat3(modelMatrix) * bn);`);
     .replace('#include <common>', '#include <common>\nvarying vec3 vWP;\nvarying vec3 vWN;\n' + VOX_GLSL)
     .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= voxAO(vWP, normalize(vWN));');
 };
+brickMat.onBeforeCompile = instancedAO;
 export const MATS = { main: mainMat, lit: litMat, dark: darkMat, foam: foamMat, mask: maskMat, roomLit: roomLitMat, roomDark: roomDarkMat };
 // a chamfered unit cube: the hull of each corner pulled in along its three axes
 export const BRICK_GEO = (() => {

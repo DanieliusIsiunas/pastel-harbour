@@ -274,6 +274,27 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       (gaff catboat, sloop with a banded main and jib, lateen felucca), heeling to leeward with a pennant,
       a stern lantern and a soft wake. Town A gains 4 fishing boats and ~6,000 triangles (252k → 258k).
 
+- [x] **C4 Townsfolk** — the town has people. Every house with a door is home to one or two residents
+      (40 at most, 18 on phones): fisherfolk by the water in yellow oilskins and sou'westers, elders who walk
+      slowly with a stoop, children, and townsfolk in coats and dresses a shade deeper than the walls, with
+      straw hats, caps and berets. They step out of their own door and go about errands the town's details
+      give them a reason for, chosen from a rule table like the planner's (`ERRANDS` in `src/plan/folk.js`):
+      look in a shop window and come away with a loaf or a basket, sit on a bench facing the water (coming
+      round its end), lean on a free stretch of railing, see to a boat at the water stairs or a berth, knock at
+      a neighbour's door and go in for a while, take a stroll, go home. Features record what they mean to
+      people where they draw (`spot()` and `obstacle()` in the builder), so the spots and the props to walk
+      round match the geometry exactly and a new detail gets used without touching the townsfolk code.
+      Walks follow the open tiles (A*), a lane's width to the right, corners rounded, pushed 15 cm clear of
+      walls and the quay edge and clear of trees, lamps, planters, crates, barrels, woodpiles, stair flights
+      and bollards. Passers-by step aside and slow behind slower walkers, turn their heads to each other, and
+      stop for a chat when they meet face to face (one gestures, the other nods). Night empties the streets
+      (outdoors drops by more than a quarter) and whoever is out carries a lit lantern. Building on a tile
+      where someone stands makes them hop to the nearest street. Figures are toy-like: rounded body, big head
+      with dot eyes and a nose, swinging stubby limbs, one instanced mesh per part (about 20 draw calls), the
+      town's voxel shading, a soft blob shadow. The simulation is deterministic and runs in Node: 29 tests
+      check determinism, clearance from walls and props, errands, chats, night, eviction, and a budget
+      (0.07 ms a frame for 40 people; 60 fps in the page). Town geometry is unchanged (same fixture digests).
+
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).
 
@@ -300,5 +321,6 @@ off for comparison (the ink outlines reuse the occlusion pass's buffers, so they
 `harbourDev` builds precise test scenes (`build([[vertex, level, colour]])`, `clear()`, `vertexAt(x, z)`,
 `neighbors(v)`, `sample(seed)`, `time(name)`), toggles `bricks(on)` / `rooms(on)`, reports `count()` of triangles and
 bricks, `plan()` and `why(vertex)` for the planner, and `digest()`, the geometry fingerprint the
-fixtures in `fixtures/` are checked against. `walk()` reports the walking network, and `shading()`
+fixtures in `fixtures/` are checked against. `walk()` reports the walking network, `folk()` the townsfolk (`follow(i, state)` frames one, `folkRate(0)`
+freezes them, `folkStep(sec)` runs them forward and `frame()` draws a frame while the page is hidden), and `shading()`
 measures darkness and harshness at fixed camera views.

@@ -261,7 +261,7 @@ export function emitFacade(bld, y, s, F, v, b, vv, cell) {
   // stairs) replace the facade, front features (shops, hoists) sit under the dormer, window features
   // (balconies) replace the window. A draw returns false to fall back to the plain facade.
   const planned = feature.get(PLAN.side.get(sideKey(v, other, y)));
-  const fc = { F, y, L, v, s, cell, lo, hi, trim, roofHex, lit };
+  const fc = { F, y, L, v, n: other, s, cell, lo, hi, trim, roofHex, lit };
   if (planned && planned.phase === 'entry' && planned.draw(bld, fc)) return;
   const house = houseOf(v) || { windows: 'joint', head: 0.2, shutters: false, flowers: false, balcony: 0.1, shop: false, shutterCol: SHUTTERS[0], awning: PALETTE[0].roof };
   // the window type depends on the facade edge only (not the floor), so windows stack floor to floor

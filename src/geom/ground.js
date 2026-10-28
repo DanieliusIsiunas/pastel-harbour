@@ -3,7 +3,7 @@ import { UVM, VERTS, cells, nx4, pv4, vAdj, vCells, xz } from '../core/grid.js';
 import { has } from '../core/model.js';
 import { C, IRON, LEAVES, PAVERS } from '../core/palette.js';
 import { P3, hash, l2, lin, norm2, outward, sub2 } from '../core/util.js';
-import { blob, boxAt, face, hexa, pickQuad, pickTri } from './builder.js';
+import { blob, boxAt, face, hexa, pickQuad, pickTri, spot } from './builder.js';
 import { PLAN } from '../plan/planner.js';
 import { edgeKey } from '../plan/analysis.js';
 import { feature } from '../features/index.js';
@@ -73,6 +73,11 @@ export function emitGroundCell(bld, ci) {
         else if (!has(v, 1)) {
           railing(bld, pt(R[i], EDGE - 0.02), pt(R[i + 1], EDGE - 0.02), GROUND + 0.045);
           if (here) here.draw(bld, { a, c, Vq, L2, v, n: facing });
+          // a free stretch of railing is somewhere to lean and watch the water
+          else if (facing >= 0 && straight && L2 > 0.3) {
+            const out = outward(a, c, Vq), m = l2(a, c, 0.5);
+            spot(bld, 'quay', v, [m[0] - out[0] * 0.15, m[1] - out[1] * 0.15], out, GROUND);
+          }
         }
       }
     }

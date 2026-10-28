@@ -3,6 +3,7 @@ import { animateGhost } from './picking.js';
 import { sampleTown } from '../core/sample.js';
 import { busy } from '../core/env.js';
 import { setBlocks } from '../core/model.js';
+import { animateFolk } from '../fx/folk.js';
 import { animateLife } from '../fx/life.js';
 import { updateFx } from '../fx/particles.js';
 import { foamMat } from '../render/materials.js';
@@ -27,6 +28,7 @@ function tick(now) {
   const dt = Math.min(0.05, (now - (tick.last || now)) / 1000);
   tick.last = now;
   animateRipple(now, dt);
+  animateFolk(dt, Math.min(1, cur.glow / 1.7));
   updateFx(dt);
   animateGhost(dt, t);
   busy.anim = ripple.length > 0 || timeBusy();
