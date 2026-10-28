@@ -253,7 +253,14 @@ export function syncFolk(F, walk, cap = MAX_FOLK) {
   const people = [];
   for (const home of W.homes.slice(0, cap)) {
     let p = was.get(home.id);
-    if (p) { was.delete(home.id); p.home = home.door.key; } else {
+    if (p) {
+      was.delete(home.id); p.home = home.door.key;
+      // a house taken away and put back before its resident was out of sight: they stay
+      if (p.gone) {
+        p.gone = false;
+        if (p.st === 'enter') { p.task = null; Object.assign(p, { st: 'look', vis: 1, until: F.t, t0: F.t }); }
+      }
+    } else {
       p = makePerson(home);
       // a new house's people come out soon after it is built; on the first load, most are already out
       if (F.fresh && hash(p.id, 0, 146, 1) < 0.65) {
@@ -283,7 +290,12 @@ export function syncFolk(F, walk, cap = MAX_FOLK) {
       Object.assign(p, { st: 'hop', from: [p.x, p.z], to: VERTS[to].slice(), t0: F.t, sit: 0, mate: -1 });
       if (p.task && p.task.spot) p.task.spot.taken = -1;
       p.task = null;
-    } else if (p.st === 'walk') go(F, p, p.task);
+    } else if (p.st === 'walk' || p.st === 'chat') {
+      // a walk goes on by the new streets, and so does one paused for a chat, once the chat is over
+      const { st, mate } = p;
+      go(F, p, p.task);
+      if (st === 'chat' && p.st === 'walk') Object.assign(p, { st, mate });
+    }
   }
 }
 function leave(p, t) { p.st = 'enter'; p.t0 = t; p.mate = -1; if (p.task && p.task.spot) p.task.spot.taken = -1; }

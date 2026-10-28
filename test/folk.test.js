@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { runScene } from '../fixtures/driver.js';
 import { SCENES } from '../fixtures/scenes.js';
 import { vAdj } from '../src/core/grid.js';
-import { blocks, keyOf } from '../src/core/model.js';
+import { blocks, keyOf, parseKey } from '../src/core/model.js';
 import { emitTown } from '../src/geom/town.js';
+import { houseOf } from '../src/plan/houses.js';
 import { BODY, makeFolk, stepFolk, syncFolk, tileOf } from '../src/plan/folk.js';
 
 // The townsfolk, run in Node: the same town gives the same people doing the same things; they walk on
@@ -96,6 +97,37 @@ it('moves someone aside when a block is built where they stand', () => {
   expect(p.st).toBe('hop');
   for (let i = 0; i < 30; i++) stepFolk(F, 1 / 30);
   expect(F.world.open.has(tileOf(p.x, p.z))).toBe(true);
+});
+it('takes the new streets after a chat when a block is built on the way', () => {
+  const F = live(SCENES.townA, 0);
+  let p = null, v = -1;
+  for (let i = 0; i < 30 * 120 && !p; i++) {
+    stepFolk(F, 1 / 30);
+    for (const q of F.people) {
+      if (q.st !== 'chat' || q.path.tiles.length < 5) continue;
+      const mate = F.people.find(o => o.id === q.mate), here = [tileOf(q.x, q.z), tileOf(mate.x, mate.z)];
+      const ahead = q.path.tiles.slice(2, -2).filter(t => !here.includes(t) && !F.people.some(o => o.vis > 0 && tileOf(o.x, o.z) === t));
+      if (ahead.length) { p = q; v = ahead[ahead.length - 1]; break; }
+    }
+  }
+  expect(p).toBeTruthy();
+  blocks.set(keyOf(v, 1), { c: '#e8a3a0' });
+  syncFolk(F, emitTown().walk);
+  expect(p.path ? p.path.tiles.includes(v) : false).toBe(false);
+  for (let i = 0; i < 30 * 15; i++) { stepFolk(F, 1 / 30); expect(tileOf(p.x, p.z)).not.toBe(v); }
+});
+it('keeps a resident whose house comes back before they are out of sight', () => {
+  const F = live(SCENES.townA, 30);
+  const p = F.people.find(o => o.st === 'walk'), h = houseOf(p.house), removed = [];
+  for (const k of [...blocks.keys()]) if (h.cols.includes(parseKey(k)[0]) && parseKey(k)[1] > 0) { removed.push([k, blocks.get(k)]); blocks.delete(k); }
+  syncFolk(F, emitTown().walk);
+  expect(p.gone).toBe(true);
+  for (let i = 0; i < 3; i++) stepFolk(F, 1 / 30);
+  for (const [k, b] of removed) blocks.set(k, b);
+  syncFolk(F, emitTown().walk);
+  for (let i = 0; i < 60; i++) stepFolk(F, 1 / 30);
+  expect(F.people.includes(p)).toBe(true);
+  expect(p.gone).toBe(false);
 });
 it('lives a frame of the default town in well under a millisecond', () => {
   const { town } = runScene(SCENES.townA), F = makeFolk();
