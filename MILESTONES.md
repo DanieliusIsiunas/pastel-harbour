@@ -294,6 +294,18 @@ Sources: Oskar Stålberg's 2019 Twitter threads on the grid; the Sylves "Townsca
       town's voxel shading, a soft blob shadow. The simulation is deterministic and runs in Node: 29 tests
       check determinism, clearance from walls and props, errands, chats, night, eviction, and a budget
       (0.07 ms a frame for 40 people; 60 fps in the page). Town geometry is unchanged (same fixture digests).
+- [x] **C4.1 Doorways** — people used to pop out of a door's foot and shrink into it again, sunk to the
+      ankles in the doorstep. Now they stand on the doorstep, clear of the door, to knock; the door swings in
+      and the doorway's dark widens from the latch side (a pair of barn doors parts in the middle, an arched
+      door shows its round head), they wait for it to open, step through into the shade and are gone once the
+      wall is in front of them, and the door shuts behind them. Coming out is the same the other way. The
+      doorway is near black by day and lamp-lit at night, with a dark figure crossing it. Each door kind
+      records its size, doorstep and hinge side on its spot, so the opening and the step fit every style.
+      A paused frame could send someone straight indoors; going in now needs the walk through. Skirts were
+      drawn inside out (only the back of the hem showed); fixed. One more test (32): over 150 s of the
+      default town, everyone who goes in or out does it through an open door, never half there, knocks on
+      the doorstep, and none skips indoors across frames of no time. `harbourDev.doorway(out)` frames the
+      next door someone goes in by (or out of); `people()` hands over the live townsfolk.
 
 - [ ] ~~M7 Sharing~~ — skipped for now.
 - [ ] ~~M8 Performance~~ — skipped for now (a full rebuild of a ~380-block town takes ~50 ms).

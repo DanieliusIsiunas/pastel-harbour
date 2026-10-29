@@ -57,7 +57,8 @@ fixture scenes produce the same geometry digest as before the restructuring, and
   order is registry order.
 - **Townsfolk:** `src/plan/folk.js` is the people of the town as plain, deterministic data: who lives in
   which house, the errand table, walks over the open tiles, and a small state machine per person
-  (inside, emerge, walk, settle, do, chat, hop, enter). Features tell it what they mean to people where they
+  (inside, emerge, walk, settle, do, chat, hop, enter, vanish). Doors open for whoever goes through them:
+  each door's spot carries its size, doorstep and hinge side, and `src/fx/folk.js` draws the open doorway. Features tell it what they mean to people where they
   draw, through the builder: `spot(bld, kind, tile, p, dir, y, extra)` (somewhere to go and do something)
   and `obstacle(bld, a, b, r)` (something on the ground to walk round); `emitTown()` returns them as
   `walk`. The renderer calls `syncFolk` after each rebuild and `stepFolk` each frame; `src/fx/folk.js`

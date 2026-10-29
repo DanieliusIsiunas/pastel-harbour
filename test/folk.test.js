@@ -88,6 +88,29 @@ it('empties the streets at night, and those out carry lanterns', () => {
   expect(outside(night)).toBeLessThan(outside(day) * 0.75);
   expect(night.people.filter(p => p.st !== 'inside').every(p => p.lantern)).toBe(true);
 });
+it('goes in and out by an open door, from the doorstep, without shrinking, even over paused frames', () => {
+  const { town } = runScene(SCENES.townA), F = makeFolk(), deep = new Map(), bad = [];
+  syncFolk(F, town.walk);
+  let ins = 0, outs = 0, knocks = 0;
+  for (let i = 0; i < 30 * 150; i++) {
+    const was = new Map(F.people.map(p => [p, p.st]));
+    // a frame of no time (the page paused, or the console froze the clock) must not move anyone on
+    stepFolk(F, i % 7 === 0 ? 0 : 1 / 30);
+    for (const p of F.people) {
+      const D = F.world.byKey.get(p.at), sp = p.task && p.task.spot;
+      if (p.st === 'do' && sp && sp.door && p.y < sp.y + sp.door.step[1]) bad.push(`${p.id} knocks below the doorstep`);
+      if (p.st === 'do' && sp && sp.door) knocks++;
+      if (p.st !== 'enter' && p.st !== 'emerge') { if (was.get(p) === 'enter' && p.st === 'inside' && !(deep.get(p) < -0.1)) bad.push(`${p.id} indoors without going through`); continue; }
+      const d = D.door.at - (p.x - D.x) * D.dir[0] - (p.z - D.z) * D.dir[1];
+      deep.set(p, was.get(p) === p.st ? Math.min(deep.get(p), d) : d);
+      if (p.vis !== 0 && p.vis !== 1) bad.push(`${p.id} half there in a doorway`);
+      if (p.vis && d < D.door.front && p.door < 0.99) bad.push(`${p.id} through a door that is not open`);
+      if (was.get(p) !== p.st) p.st === 'enter' ? ins++ : outs++;
+    }
+  }
+  expect(bad.slice(0, 5)).toEqual([]);
+  expect(Math.min(ins, outs, knocks)).toBeGreaterThan(5);
+});
 it('moves someone aside when a block is built where they stand', () => {
   const F = live(SCENES.townA, 30);
   const p = F.people.find(o => o.st === 'walk');

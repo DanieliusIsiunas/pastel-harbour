@@ -7,6 +7,17 @@ import { WALKABLE } from '../plan/analysis.js';
 import { houseOf, roofOf } from '../plan/houses.js';
 import { styleOf } from '../plan/styles.js';
 
+// what the townsfolk need to know of each kind of door to come and go through it: the leaf's half-width and
+// height (an arched door adds its round head), how far out from the wall the dark of the open doorway must
+// stand to hide the handle and straps, and the doorstep's depth, height and half-width. A barn door is a
+// pair of leaves; the others hang on one side
+const LEAF = {
+  barn: { w: 0.24, h: 0.74, arch: 0, pair: true, front: 0.065, step: [0.12, 0.03, 0.28] },
+  arched: { w: 0.13, h: 0.66, arch: 0.13, front: 0.075, step: [0.16, 0.05, 0.22] },
+  plank: { w: 0.13, h: 0.6, arch: 0, front: 0.075, step: [0.14, 0.04, 0.2] },
+  panel: { w: 0.16, h: 0.64, arch: 0, front: 0.075, step: [0.17, 0.05, 0.25] },
+};
+
 // a door onto walkable ground in the house type's own style, with a lamp and potted shrubs
 export default {
   kind: 'door', slot: 'side', phase: 'entry',
@@ -16,8 +27,11 @@ export default {
   draw(bld, { F, y, L, v, n, lo, hi }) {
     const kind = styleOf(v).door;
     doorway(bld, F, y, L, kind, roofOf(v, y), lo, hi);
-    // the threshold, where the people who live here come and go and visitors knock
-    spot(bld, 'door', n, [F.a[0] + F.n[0] * 0.07, F.a[1] + F.n[1] * 0.07], [-F.n[0], -F.n[1]], GROUND, { home: v });
+    // the threshold, where the people who live here come and go and visitors knock. Both halves record the
+    // same door (the hinge side is the joint's, not the half's). They stand on the doorstep, clear of the door
+    const shape = LEAF[kind === 'barn' && L <= 0.3 ? 'panel' : kind], at = shape.step[0] - 0.04;
+    const leaf = { ...shape, at, base: y, hinge: hash(lo, hi, 2, 153) < 0.5 ? -1 : 1 };
+    spot(bld, 'door', n, [F.a[0] + F.n[0] * at, F.a[1] + F.n[1] * at], [-F.n[0], -F.n[1]], GROUND, { home: v, door: leaf });
     if (kind !== 'barn' && L > 0.33) {
       wb(bld, F, 0.27, 0.32, 0, 0.07, y + 0.52, y + 0.62, lin(C.lamp), 'lit');
       wb(bld, F, 0.285, 0.305, 0, 0.07, y + 0.62, y + 0.66, lin(C.wood));

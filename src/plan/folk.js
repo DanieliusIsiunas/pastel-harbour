@@ -2,7 +2,7 @@ import { GROUND } from '../core/dims.js';
 import { VERTS, cells, footprintAt, vAdj, vCells, vFixed, vertexAt } from '../core/grid.js';
 import { has } from '../core/model.js';
 import { FOLK } from '../core/palette.js';
-import { easeOutBack, hash, l2, smooth } from '../core/util.js';
+import { hash, l2, smooth } from '../core/util.js';
 import { isOpen } from './analysis.js';
 import { houses } from './houses.js';
 
@@ -21,6 +21,8 @@ const WALL_CLEAR = 0.15;           // how far walking lines keep from house wall
 const STEP = 0.04;                 // path sample spacing
 const MAX_FOLK = 40;
 const FLOOR = GROUND + 0.015;      // the top of the paving
+const INDOORS = -0.16;             // how far inside the wall face someone is when the door shuts behind them
+const SWING = 0.4;                 // seconds for a door to swing open or shut
 
 // The errands, in the planner's style: who goes (weight by persona), where (a kind of spot, or none), what
 // they do there and for how long (seconds), how much night changes the wish (a factor), and why.
@@ -238,6 +240,7 @@ function makePerson(home) {
     st: 'inside', at: home.door.key, until: 0, t0: 0, x: home.door.x, z: home.door.z, y: FLOOR,
     yaw: yawOf(home.door.dir), vis: 0, v: 0, side: 0, phase: r(16) * 6.28, gait: 0, sit: 0, bend: 0, gesture: 0,
     head: 0, nod: 0, hop: 0, carry: null, lantern: false, task: null, path: null, s: 0, mate: -1, cool: 0, gone: false,
+    door: 0, dim: 0, way: null,
   };
 }
 const rnd = (p, salt) => hash(p.id, p.n++, salt, 142);
@@ -258,7 +261,7 @@ export function syncFolk(F, walk, cap = MAX_FOLK) {
       // a house taken away and put back before its resident was out of sight: they stay
       if (p.gone) {
         p.gone = false;
-        if (p.st === 'enter') { p.task = null; Object.assign(p, { st: 'look', vis: 1, until: F.t, t0: F.t }); }
+        if (p.st === 'vanish') { p.task = null; Object.assign(p, { st: 'look', vis: 1, until: F.t, t0: F.t }); }
       }
     } else {
       p = makePerson(home);
@@ -276,12 +279,14 @@ export function syncFolk(F, walk, cap = MAX_FOLK) {
   F.people = people;
   F.fresh = false;
   for (const p of people) {
+    // a doorway built over while someone was in it: they are indoors
+    if ((p.st === 'enter' || p.st === 'emerge') && !W.byKey.has(p.at)) Object.assign(p, { st: 'inside', vis: 0, door: 0, task: null, until: F.t + 2 });
     if (!W.byKey.has(p.at)) p.at = p.home;
     if (p.task && p.task.spot) {
       const sp = W.byKey.get(p.task.spot.key);
-      if (sp) { p.task.spot = sp; sp.taken = p.id; } else if (p.st !== 'inside' && p.st !== 'enter') drop(F, p);
+      if (sp) { p.task.spot = sp; sp.taken = p.id; } else if (!indoors(p)) drop(F, p);
     }
-    if (p.st === 'inside' || p.st === 'enter' || p.gone) continue;
+    if (indoors(p) || p.gone) continue;
     const t = tileOf(p.x, p.z);
     if (!W.open.has(t)) {
       // the ground went from under them: a hop to the nearest street, or home if there is none
@@ -298,7 +303,10 @@ export function syncFolk(F, walk, cap = MAX_FOLK) {
     }
   }
 }
-function leave(p, t) { p.st = 'enter'; p.t0 = t; p.mate = -1; if (p.task && p.task.spot) p.task.spot.taken = -1; }
+// in, or on the way in or out through a doorway, or popping out of sight: not standing on the street
+const indoors = p => p.st === 'inside' || p.st === 'enter' || p.st === 'emerge' || p.st === 'vanish';
+// gone at once where they stand: their house was taken away, or there is no street left to stand on
+function leave(p, t) { p.st = 'vanish'; p.t0 = t; p.mate = -1; if (p.task && p.task.spot) p.task.spot.taken = -1; }
 // give up the current errand where they stand
 function drop(F, p) {
   if (p.task && p.task.spot) p.task.spot.taken = -1;
@@ -371,6 +379,8 @@ function live(F, p, dt, night) {
   const t = F.t, W = F.world, task = p.task;
   p.lantern = night > 0.45;
   p.gesture *= Math.max(0, 1 - dt * 4);
+  // a door left open behind someone swings shut
+  if (p.st !== 'enter' && p.st !== 'emerge') { p.door = Math.max(0, p.door - dt / SWING); p.dim = 0; }
   let lookAt = null;
   switch (p.st) {
     case 'inside': {
@@ -378,18 +388,30 @@ function live(F, p, dt, night) {
       if (t < p.until || p.gone) return;
       // at night most people stay in; the ones who come out carry a lantern
       if (night > 0.3 && rnd(p, 150) < 0.7 * night) { p.until = t + 15 + 40 * rnd(p, 150); return; }
-      const door = W.byKey.get(p.at);
-      if (!door) { p.until = t + 5; return; }
-      Object.assign(p, { st: 'emerge', t0: t, x: door.x, z: door.z, y: FLOOR, yaw: yawOf(door.dir) + Math.PI, sit: 0, bend: 0 });
-      return;
+      const D = W.byKey.get(p.at);
+      if (!D) { p.until = t + 5; return; }
+      // out through the door they went in by: from just inside, onto the street clear of the doorstep
+      Object.assign(p, { st: 'emerge', t0: t, way: [0, INDOORS, D.door.step[0] + 0.06], yaw: yawOf(D.dir) + Math.PI, sit: 0, bend: 0 });
+      break;
     }
-    case 'emerge': {
-      const u = Math.min(1, (t - p.t0) / 0.35);
-      p.vis = easeOutBack(u);
-      if (u < 1) return;
-      p.vis = 1;
-      p.st = 'look'; p.until = t; p.t0 = t;
-      return;
+    case 'emerge': case 'enter': {
+      // the door swings in, they step through once it is open, and it shuts behind them once they are past it
+      const D = W.byKey.get(p.at), T = t - p.t0, [s0, d0, d1] = p.way;
+      const speed = p.pace * 0.8, dur = Math.abs(d1 - d0) / speed, u = Math.max(0, Math.min(1, (T - SWING) / dur));
+      const d = d0 + (d1 - d0) * u, s = s0 * (1 - smooth(u));
+      p.x = D.x + D.dir[1] * s - D.dir[0] * (d - D.door.at); p.z = D.z - D.dir[0] * s - D.dir[1] * (d - D.door.at);
+      p.yaw = turn(p.yaw, yawOf(D.dir) + (p.st === 'enter' ? 0 : Math.PI), dt * 8);
+      p.v = u > 0 && u < 1 ? speed : 0;
+      p.phase += p.v * dt / (0.3 * p.size) * Math.PI * 2;
+      p.door = Math.min(1, T / SWING, 1 - (T - SWING - dur) / SWING);
+      // into the doorway's shade as they step toward it, all dark by the time they reach it, and out of sight
+      // once most of them is past it (whatever still sticks out is as dark as the doorway)
+      const front = D.door.front, lit = p.st === 'enter' ? Math.max(d0, front + 0.02) : front + 0.08;
+      p.dim = Math.max(0, Math.min(1, (lit - d) / (lit - front)));
+      p.vis = d > front - 0.04 ? 1 : 0;
+      if (p.st === 'emerge' && u >= 1) { p.st = 'look'; p.until = t; p.t0 = t; }
+      if (p.st === 'enter' && u >= 1 && p.door <= 0) { p.st = 'inside'; p.vis = 0; p.door = 0; p.carry = null; p.task = null; p.until = t + stayInside(p, night); return; }
+      break;
     }
     case 'look': case 'do': {
       // standing: at a spot doing the errand's thing, or looking about
@@ -464,21 +486,35 @@ function live(F, p, dt, night) {
       if (u >= 1) { p.hop = 0; p.st = 'look'; p.until = t + 0.6; p.t0 = t; }
       break;
     }
-    case 'enter': {
+    case 'vanish': {
       const u = Math.min(1, (t - p.t0) / 0.3);
       p.vis = 1 - smooth(u);
       if (u >= 1) { p.st = 'inside'; p.vis = 0; p.carry = null; p.until = t + stayInside(p, night); }
       return;
     }
   }
-  if (p.st !== 'settle' && p.st !== 'rise' && !(p.st === 'do' && task && task.pose === 'sit')) p.y = FLOOR;
-  p.gait += ((p.st === 'walk' ? Math.min(1, p.v / (0.5 * p.pace)) : 0) - p.gait) * Math.min(1, dt * 8);
+  if (p.st !== 'settle' && p.st !== 'rise' && !(p.st === 'do' && task && task.pose === 'sit')) p.y = FLOOR + stepUp(W, p);
+  const striding = p.st === 'walk' || p.st === 'enter' || p.st === 'emerge';
+  p.gait += ((striding ? Math.min(1, p.v / (0.5 * p.pace)) : 0) - p.gait) * Math.min(1, dt * 8);
   // the head turns toward whoever is near (a passer-by, the person they're talking to), or wanders
   if (!lookAt) for (const q of F.people) if (q !== p && q.vis > 0.5 && dist(p.x, p.z, q.x, q.z) < 0.7) { lookAt = q; break; }
   let aim = 0;
   if (lookAt) aim = Math.max(-1, Math.min(1, wrap(Math.atan2(lookAt.x - p.x, lookAt.z - p.z) - p.yaw)));
   else if (p.st === 'look' || p.st === 'do' && task && (task.pose === 'gaze' || task.pose === 'sit')) aim = Math.sin(t * 0.5 + p.id) * 0.6;
   p.head += (aim - p.head) * Math.min(1, dt * 4);
+}
+// a door's doorstep under whoever is about to go in or has just come out: a short rise onto the stone, and
+// the same height indoors
+function stepUp(W, p) {
+  const D = p.task && p.task.spot && p.task.spot.door ? p.task.spot : W.byKey.get(p.at);
+  if (!D || !D.door || dist(p.x, p.z, D.x, D.z) > 0.4) return 0;
+  const [s, d] = across(D, p.x, p.z), [deep, rise, half] = D.door.step;
+  return Math.abs(s) > half + 0.02 ? 0 : rise * Math.max(0, Math.min(1, (deep + 0.03 - d) / 0.06));
+}
+// where (x, z) is from a door: along the wall from its middle, and out from the wall face
+function across(D, x, z) {
+  const dx = x - D.x, dz = z - D.z;
+  return [dx * D.dir[1] - dz * D.dir[0], D.door.at - dx * D.dir[0] - dz * D.dir[1]];
 }
 const stayOf = (p, task) => task.stay[0] + (task.stay[1] - task.stay[0]) * rnd(p, 151);
 const stayInside = (p, night) => (night > 0.5 ? 25 + 50 * rnd(p, 152) : 6 + 16 * rnd(p, 152));
@@ -494,7 +530,7 @@ function arrive(F, p) {
 function note(F, p, kind) { F.log.push({ t: F.t, id: p.id, kind }); if (F.log.length > 400) F.log.splice(0, 100); }
 function finish(F, p) {
   const task = p.task, sp = task.spot;
-  if (task.kind === 'home' || task.kind === 'visit') { p.at = sp.key; p.st = 'enter'; p.t0 = F.t; sp.taken = -1; return; }
+  if (task.kind === 'home' || task.kind === 'visit') { p.at = sp.key; p.st = 'enter'; p.t0 = F.t; p.way = [...across(sp, p.x, p.z), INDOORS]; sp.taken = -1; return; }
   if (task.kind === 'shop') p.carry = SHOP_GOODS[sp.sells] || 'basket';
   if (task.kind === 'mooring' && p.persona === 'fisher') p.carry = 'basket';
   if (sp && sp.via) { p.st = 'rise'; p.t0 = F.t; note(F, p, 'rise'); return; }

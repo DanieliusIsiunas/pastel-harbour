@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { commit } from './history.js';
 import { sampleTown } from '../core/sample.js';
+import { GROUND } from '../core/dims.js';
 import { VERTS, vAdj, vertexAt } from '../core/grid.js';
 import { blocks, has, keyOf, setBlocks } from '../core/model.js';
 import { houses } from '../plan/houses.js';
 import { lampSpot } from '../features/lamp.js';
 import { animateFolk, folk, folkClock } from '../fx/folk.js';
+import { tileOf } from '../plan/folk.js';
 import { rippleClock, ripples } from '../fx/particles.js';
 import { spanOf } from '../features/span.js';
 import { digestTown, emitTown } from '../geom/town.js';
@@ -150,6 +152,8 @@ window.harbourDev = {
     return { people: folk.people.length, states: count(folk.people, p => p.st), personas: count(folk.people, p => p.persona),
       spots: count(folk.world ? folk.world.spots : [], s => s.kind), done: count(folk.log, e => e.kind) };
   },
+  // the live townsfolk, to look into one person or door (importing the module from the console can give a copy)
+  people: () => folk,
   // run the townsfolk's time at a rate: 0 freezes them for a close look, 1 is normal
   folkRate: k => { folkClock.rate = k; },
   // run the townsfolk forward by some seconds at once (at the current time of day), then draw one frame:
@@ -171,6 +175,26 @@ window.harbourDev = {
     window.harbourView(p.x + Math.sin(p.yaw) * back, h, p.z + Math.cos(p.yaw) * back, p.x, p.y + 0.25, p.z);
     window.harbourDev.frame();
     return { id: p.id, persona: p.persona, st: p.st, task: p.task && p.task.kind, carry: p.carry };
+  },
+  // frame the next door someone goes in by (or, with out, comes out of): runs the townsfolk until someone
+  // stands at a door with open street in front of it, and stands the camera on that street. folkStep(sec)
+  // then plays it on a little at a time
+  doorway: (out = false) => {
+    const W = folk.world, roomy = s => [0.4, 0.8, 1.2].every(r => W.open.has(tileOf(s.x - s.dir[0] * r, s.z - s.dir[1] * r)));
+    const at = p => (out ? p.st === 'inside' && p.until - folk.t < 0.1 && W.byKey.get(p.at) : p.st === 'do' && p.task.spot && p.task.spot.door && p.task.spot);
+    const rate = folkClock.rate;
+    folkClock.rate = 1;
+    let p = null;
+    for (let i = 0; i < 3000 && !p; i++) {
+      p = folk.people.find(o => at(o) && roomy(at(o)));
+      if (!p) animateFolk(1 / 30, Math.min(1, cur.glow / 1.7));
+    }
+    folkClock.rate = rate;
+    if (!p) return null;
+    const s = at(p);
+    window.harbourView(s.x - s.dir[0] * 1.2 - s.dir[1] * 0.45, GROUND + 0.7, s.z - s.dir[1] * 1.2 + s.dir[0] * 0.45, s.x, GROUND + 0.36, s.z);
+    window.harbourDev.frame();
+    return { id: p.id, st: p.st, door: s.door };
   },
   why: v => PLAN.log.filter(e => e.at.startsWith(v + '>') || e.at === 'tile ' + v || e.at.startsWith('edge ' + v + '~')),
   toggle: { shadows: on => { renderer.shadowMap.autoUpdate = on; }, bloom: on => { bloom.enabled = on; }, reflection: on => { water.visible = on; } },
