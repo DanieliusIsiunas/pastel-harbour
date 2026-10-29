@@ -81,8 +81,8 @@ touch the DOM. That keeps them running in Node (tests) and movable to a worker l
    If it changed by accident, find out why before re-recording.
 3. Look at it. In the dev page console, `harbourDev` offers: `sample(seed)`, `place(v, y)` /
    `remove(v, y)` (like clicks, with animation), `find(kind)` and `look(kind, i)` to frame a feature,
-   `span(v)`, `walk()`, `plan()`, `why(v)`, `folk()`, `follow(i, state)`, `folkRate(k)` and `folkStep(sec)` for the
-   townsfolk, `frame()` (draw one frame, e.g. while the pane is hidden), `time('Day'|'Dusk'|'Night')`, `rippleAt(v, age)` (frozen
+   `span(v)`, `walk()`, `plan()`, `why(v)`, `folk()`, `follow(i, state)`, `doorway(out)`, `people()`, `folkRate(k)` and
+   `folkStep(sec)` for the townsfolk, `frame()` (draw one frame, e.g. while the pane is hidden), `time('Day'|'Dusk'|'Night')`, `rippleAt(v, age)` (frozen
    water ripple), `shading()` (darkness metrics), `camera()` and `auto()`, `digest()`. `harbourView(...)` takes
    the camera manually; `harbourDev.auto()` hands it back.
 4. Lighting budget (default town, day, wide view, `harbourDev.shading()[0]`): near-black under 1%,
